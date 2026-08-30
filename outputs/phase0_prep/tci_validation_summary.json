@@ -1,0 +1,13 @@
+{
+  "total_feet": 334,
+  "valid_comparisons": 334,
+  "incomplete_data": 0,
+  "no_spreadsheet_value": 0,
+  "mean_absolute_error": 1.1029287928729486e-11,
+  "max_absolute_error": 4.264677500032121e-11,
+  "mismatches_above_threshold": 0,
+  "threshold": 0.005,
+  "pass": true,
+  "reference_version": "fixed_v1_26.1_25.7_26.4_25.8",
+  "timestamp": "2026-08-02T16:36:50.480639+00:00"
+}

@@ -1,0 +1,43 @@
+{
+  "class_index_map": {
+    "Healthy": 0,
+    "DM_Grade0": 1,
+    "DM_Grade1": 2,
+    "DM_Grade2": 3,
+    "DM_Grade3": 4,
+    "DM_Grade4": 5
+  },
+  "train_image_counts": {
+    "Healthy": 62,
+    "DM_Grade0": 14,
+    "DM_Grade1": 22,
+    "DM_Grade2": 24,
+    "DM_Grade3": 52,
+    "DM_Grade4": 58
+  },
+  "n_samples": 232,
+  "n_classes": 6,
+  "weights_by_class": {
+    "Healthy": 0.623656,
+    "DM_Grade0": 2.761905,
+    "DM_Grade1": 1.757576,
+    "DM_Grade2": 1.611111,
+    "DM_Grade3": 0.74359,
+    "DM_Grade4": 0.666667
+  },
+  "weights_as_tensor_order": [
+    0.623656,
+    2.761905,
+    1.757576,
+    1.611111,
+    0.74359,
+    0.666667
+  ],
+  "weighted_mean_sanity_check": 1.0,
+  "formula": "n_samples / (n_classes * n_samples_per_class)",
+  "normalization_invariant": "frequency-weighted mean = 1.0",
+  "source_split": "train",
+  "source_manifest": "outputs/preprocessing_manifest.csv",
+  "source_manifest_sha256": "a2d826416fc893fe4a5aa55891704752ac6c7b737a5be57c11e4edab2bbfc9ec",
+  "timestamp": "2026-08-06T21:28:04.857252+00:00"
+}

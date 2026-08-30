@@ -1,0 +1,82 @@
+{
+  "total_images": 334,
+  "per_split": {
+    "train": {
+      "total_images": 232,
+      "subjects": 116
+    },
+    "val": {
+      "total_images": 50,
+      "subjects": 25
+    },
+    "test": {
+      "total_images": 52,
+      "subjects": 26
+    }
+  },
+  "per_class": {
+    "Healthy": {
+      "total_images": 90,
+      "train": 62,
+      "val": 14,
+      "test": 14
+    },
+    "DM_Grade0": {
+      "total_images": 22,
+      "train": 14,
+      "val": 4,
+      "test": 4
+    },
+    "DM_Grade1": {
+      "total_images": 30,
+      "train": 22,
+      "val": 4,
+      "test": 4
+    },
+    "DM_Grade2": {
+      "total_images": 36,
+      "train": 24,
+      "val": 6,
+      "test": 6
+    },
+    "DM_Grade3": {
+      "total_images": 74,
+      "train": 52,
+      "val": 10,
+      "test": 12
+    },
+    "DM_Grade4": {
+      "total_images": 82,
+      "train": 58,
+      "val": 12,
+      "test": 12
+    }
+  },
+  "preprocessing_params": {
+    "normalization": "predefined_fixed_physical_range",
+    "phys_min_celsius": 15.0,
+    "phys_max_celsius": 35.0,
+    "normalization_note": "Range [15,35]C fixed as physiologically plausible bounds before training. Same constants applied to all splits. Not derived from data statistics.",
+    "background_threshold": 0.0,
+    "background_note": "Background pixels explicitly set to 0 after masking. In this dataset, foreground temperatures are above the lower normalization bound, so 0.0 is expected to represent background in practice.",
+    "target_height": 128,
+    "target_width": 64,
+    "resize_thermal": "One method per image: INTER_AREA if either source dim > target, else INTER_LINEAR",
+    "resize_mask": "INTER_NEAREST always (binary mask, never blended)",
+    "mask_reapplied_after_resize": true,
+    "colormap": "plasma",
+    "l_foot_horizontal_flip": true,
+    "l_flip_is_augmentation": false,
+    "augmentation": "none"
+  },
+  "clipping_audit": {
+    "total_foreground_pixels_below_phys_min": 0,
+    "total_foreground_pixels_above_phys_max": 39232
+  },
+  "input_manifest_sha256": "ecfb69ebc6826b5b737cad35874ec726eb6adc2806d1e6372fe015b129cf3885",
+  "python_version": "3.13.5",
+  "numpy_version": "2.2.3",
+  "cv2_version": "5.0.0",
+  "pandas_version": "2.3.3",
+  "timestamp": "2026-08-05T14:42:51.234122+00:00"
+}

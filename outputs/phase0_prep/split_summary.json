@@ -1,0 +1,56 @@
+{
+  "total_subjects": 167,
+  "split_totals": {
+    "train": 116,
+    "val": 25,
+    "test": 26
+  },
+  "per_class": {
+    "Healthy": {
+      "total": 45,
+      "train": 31,
+      "val": 7,
+      "test": 7
+    },
+    "DM_Grade0": {
+      "total": 11,
+      "train": 7,
+      "val": 2,
+      "test": 2
+    },
+    "DM_Grade1": {
+      "total": 15,
+      "train": 11,
+      "val": 2,
+      "test": 2
+    },
+    "DM_Grade2": {
+      "total": 18,
+      "train": 12,
+      "val": 3,
+      "test": 3
+    },
+    "DM_Grade3": {
+      "total": 37,
+      "train": 26,
+      "val": 5,
+      "test": 6
+    },
+    "DM_Grade4": {
+      "total": 41,
+      "train": 29,
+      "val": 6,
+      "test": 6
+    }
+  },
+  "seed": 42,
+  "test_size_first_split": 0.15,
+  "val_size_second_split": 0.17647,
+  "split_method": "sklearn two-step train_test_split (stratified by model_class)",
+  "input_manifest_sha256": "533f9ce70041ef630f253837d86f62ce2d1b918dec1ea1754cdc969240fc43f5",
+  "python_version": "3.13.5",
+  "pandas_version": "2.3.3",
+  "sklearn_version": "1.9.0",
+  "numpy_version": "2.2.3",
+  "timestamp": "2026-08-03T23:18:42.811061+00:00"
+}

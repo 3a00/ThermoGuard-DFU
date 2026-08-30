@@ -1,0 +1,27 @@
+{
+  "split": "train",
+  "n_arrays": 232,
+  "array_shape": [
+    128,
+    64
+  ],
+  "pixel_scope": "all_pixels (foreground + background zeros)",
+  "pixel_mean": 0.500715,
+  "pixel_std": 0.339159,
+  "pixel_min": 0.0,
+  "pixel_max": 1.0,
+  "foreground_pixel_mean": 0.686155,
+  "foreground_pixel_std": 0.174327,
+  "foreground_pixel_min": 0.000309,
+  "foreground_pixel_max": 1.0,
+  "foreground_near_zero_pixels": 10,
+  "foreground_near_zero_note": "Foreground pixels with normalized value in (0.0, 0.001). Correspond to raw temps just above 15C (lower physiological bound). Valid tissue pixels -- correctly counted as foreground. The manifest records pre-resize audit values only; these post-resize foreground-only statistics are independent audit statistics and are not directly comparable to manifest counts. The foreground_pixels_below_phys_min column in preprocessing_manifest.csv is a separate pre-resize audit of pixels at the lower physical bound.",
+  "foreground_separation_note": "Foreground derived from post-resize .npy files using value > float32(0.0). Audited convention, not a stored binary mask. Manifest foreground_pixels column is PRE-RESIZE and NOT comparable to these counts.",
+  "total_pixels": 1900544,
+  "foreground_pixels_post_resize": 1386904,
+  "background_pixels_post_resize": 513640,
+  "background_fraction": 0.270259,
+  "normalization_note": "Values already in [0,1] from Phase 0.7 global physical normalization. Additional mean/std standardization is optional. Supervisor decision required before Phase 1 DataLoader implementation.",
+  "source_manifest": "outputs/preprocessing_manifest.csv",
+  "timestamp": "2026-08-06T21:28:04.902062+00:00"
+}

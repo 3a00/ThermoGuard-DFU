@@ -1,0 +1,7 @@
+model_class,total,train,val,test,train_pct,val_pct,test_pct
+Healthy,45,31,7,7,68.9,15.6,15.6
+DM_Grade0,11,7,2,2,63.6,18.2,18.2
+DM_Grade1,15,11,2,2,73.3,13.3,13.3
+DM_Grade2,18,12,3,3,66.7,16.7,16.7
+DM_Grade3,37,26,5,6,70.3,13.5,16.2
+DM_Grade4,41,29,6,6,70.7,14.6,14.6

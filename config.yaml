@@ -1,0 +1,394 @@
+seed: 42
+
+# ---------------------------------------------------------------------------
+# Portability note:
+#   All paths under data/, outputs/ are project-relative (no leading slash).
+#   Scripts resolve them via:  os.path.join(PROJECT_ROOT, relative_path)
+#   where PROJECT_ROOT = the thermalDFU/ folder, detected automatically.
+#
+#   The only absolute paths are the raw IEEE dataset (which lives outside
+#   the project root and is read-only). Update data.extracted_root and
+#   data.excel_path when moving to a new machine.
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Raw dataset (machine-specific — update when moving to a new PC)
+# ---------------------------------------------------------------------------
+data:
+  extracted_root: "IEE data port(original)/ThermoDataBase(IEE data port)/ThermoDataBase"
+  excel_path:     "IEE data port(original)/ThermoDataBase(IEE data port)/ThermoDataBase/Plantar Thermogram Database.xlsx"
+
+  # Phase 0.5/0.6 manifests (project-relative, read-only after generation)
+  manifest_unsplit_path: "data/subject_manifest_unsplit.csv"
+  manifest_path:         "data/subject_manifest.csv"
+  file_manifest_path:    "data/file_traceability_manifest.csv"
+
+  # Phase 0.7 processed arrays / images (project-relative)
+  processed_root:        "data/processed"
+  processed_arrays_root: "data/processed/arrays"
+  processed_images_root: "data/processed/images"
+
+# ---------------------------------------------------------------------------
+# TCI scoring (Phase 0.5) — locked, do not modify
+# ---------------------------------------------------------------------------
+tci:
+  # Fixed reference vector from [TCI-2017] (Hernandez-Contreras et al., 2017)
+  # Verified against [DB-2019] spreadsheet — 334/334 feet, MAE = 0.0
+  # DO NOT recompute from CG subjects.
+  reference_vector:
+    LCA: 26.1
+    LPA: 25.7
+    MCA: 26.4
+    MPA: 25.8
+  reference_version: "fixed_v1_26.1_25.7_26.4_25.8"
+
+  # Grade thresholds — applied to DM subjects only.
+  # CG subjects are always labeled Healthy regardless of TCI.
+  grade_thresholds: [1.0, 2.0, 3.0, 5.0]
+
+  # Data-quality sanity-check bounds (degrees C).
+  sanity_bounds:
+    min: 15.0
+    max: 45.0
+
+  # Validation acceptance criteria
+  validation:
+    max_mae: 0.001
+    max_single_error: 0.005
+
+# ---------------------------------------------------------------------------
+# Preprocessing (Phase 0.7) — locked
+# ---------------------------------------------------------------------------
+preprocessing:
+  target_height:        128     # H (128 rows x 64 cols = float32 .npy)
+  target_width:         64      # W
+  colormap:             "plasma"
+  background_threshold: 0.0    # pixels <= this are background (masked)
+  phys_min:             15.0   # predefined lower normalization bound
+  phys_max:             35.0   # predefined upper normalization bound
+
+# ---------------------------------------------------------------------------
+# Training global config (Phase 0.8) — class indices locked, do not reorder
+# ---------------------------------------------------------------------------
+training:
+  class_index_map:
+    Healthy:   0
+    DM_Grade0: 1
+    DM_Grade1: 2
+    DM_Grade2: 3
+    DM_Grade3: 4
+    DM_Grade4: 5
+  # Pixel statistics — train split only (Phase 0.8 output, locked)
+  pixel_mean:            0.500715
+  pixel_std:             0.339159
+  foreground_pixel_mean: 0.686155
+  foreground_pixel_std:  0.174327
+
+# ---------------------------------------------------------------------------
+# Phase 0 outputs (all project-relative)
+# ---------------------------------------------------------------------------
+phase0_outputs:
+  # Phase 0.5 — TCI labeling
+  tci_validation_report:   "outputs/phase0_prep/tci_validation_report.csv"
+  tci_validation_summary:  "outputs/phase0_prep/tci_validation_summary.json"
+  tci_mismatch_report:     "outputs/phase0_prep/tci_mismatch_report.csv"
+  tci_distribution_plot:   "outputs/phase0_prep/tci_distribution_by_group.png"
+  # Phase 0.6 — Data split
+  split_summary:            "outputs/phase0_prep/split_summary.json"
+  split_distribution_report: "outputs/phase0_prep/split_distribution_report.csv"
+  split_distribution_plot:  "outputs/phase0_prep/split_distribution_plot.png"
+  # Phase 0.7 — Preprocessing
+  preprocessing_manifest:   "outputs/phase0_prep/preprocessing_manifest.csv"
+  preprocessing_summary:    "outputs/phase0_prep/preprocessing_summary.json"
+  preprocessing_report:     "outputs/phase0_prep/preprocessing_report.png"
+  # Phase 0.8 — Class weights & statistics
+  class_weights:            "outputs/phase0_prep/class_weights.json"
+  dataset_statistics:       "outputs/phase0_prep/dataset_statistics.json"
+  class_distribution_plot:  "outputs/phase0_prep/class_distribution_report.png"
+
+# ---------------------------------------------------------------------------
+# Phase 1.0 — EfficientNet-B0 Baseline
+# ---------------------------------------------------------------------------
+phase1_0:
+  # Architecture
+  model:       "efficientnet_b0"
+  pretrained:  true
+  num_classes: 6
+
+  # Input resolution — deterministic NEAREST resize (ALL splits, not augmentation).
+  # 128x64 -> 224x112: preserves 2:1 aspect ratio, ~7x4 final feature map (stride=32).
+  resize_h: 224
+  resize_w: 112
+
+  # Two-stage transfer learning
+  stage_a_epochs: 5    # backbone frozen + eval() mode (true BN freeze)
+  stage_b_epochs: 45   # full fine-tuning, BN adapts to thermal domain
+
+  # Optimizer: Adam
+  lr_stage_a:   1.0e-3
+  lr_stage_b:   1.0e-4
+  weight_decay: 1.0e-4
+
+  # Gradient clipping (Stage B only)
+  max_grad_norm: 1.0
+
+  # Scheduler: CosineAnnealingLR (locked — supervisor)
+  scheduler: "cosine"
+  eta_min:   1.0e-6
+
+  # DataLoader (GTX 1650 defaults — AGENTS.md)
+  batch_size:  16
+  num_workers: 2
+  pin_memory:  true
+
+  # On-the-fly augmentation (train split only, AFTER resize)
+  # RandomHorizontalFlip: NO config entry — disabled permanently (Phase 0.7 canonical flip).
+  # RandomVerticalFlip:   NO config entry — disabled permanently (supervisor v5 decision;
+  #                       toe<->heel inversion invalid for plantar thermography).
+  augment_rotation_deg:      10
+  augment_translate:         0.05
+  augment_scale_min:         0.95
+  augment_scale_max:         1.05
+  augment_erasing_p:         0.1
+  augment_erasing_scale_min: 0.02
+  augment_erasing_scale_max: 0.05
+  augment_erasing_ratio_min: 0.3
+  augment_erasing_ratio_max: 3.3
+  augment_erasing_value:     0
+  augment_noise_std:         0.01
+
+  # Normalization: keep [0,1] as-is (supervisor Option A, locked)
+  normalize_mean_std: false
+
+  # Outputs (project-relative)
+  out_checkpoint_best: "outputs/phase1_0_baseline/checkpoints/phase1_best_val_f1.pth"
+  out_checkpoint_last: "outputs/phase1_0_baseline/checkpoints/phase1_last_epoch.pth"
+  out_metrics_log:     "outputs/phase1_0_baseline/metrics/phase1_training_log.csv"
+  out_test_report:     "outputs/phase1_0_baseline/metrics/phase1_test_classification_report.csv"
+  out_test_preds:      "outputs/phase1_0_baseline/metrics/phase1_test_predictions.csv"
+  out_curves_plot:     "outputs/phase1_0_baseline/plots/phase1_training_curves.png"
+  out_cm_plot:         "outputs/phase1_0_baseline/plots/phase1_confusion_matrix.png"
+
+  # Phase 1.0 Benchmark Results (Executed 2026-08-08):
+  # Best Val Weighted-F1: 0.3305  (Epoch 5, Stage A)
+  # Test Accuracy:        0.3846  (19/52)
+  # Test Weighted-F1:     0.3267
+  # Test Macro-F1:        0.2169
+
+# ---------------------------------------------------------------------------
+# Phase 1.1 — EfficientNet-B0 Upgraded (Ablation)
+# Upgrades over Phase 1.0:
+#   - Bilinear resize + hard NEAREST mask from original 128x64 array
+#   - ConcatPool2d (GAP+GMP) -> 2560-dim feature vector
+#   - 2-layer regularized bottleneck head (Dropout 0.4/0.3, BN1d, 3 classes)
+#   - Selective Stage B freeze: features[7] only (not full unfreeze)
+#   - Stage B BN fix: model.features.eval() then model.features[7].train()
+#   - Stage-split weight decay (1e-4 Stage A warm-up, 1e-3 Stage B fine-tune)
+#   - Stage A extended to 8 epochs (BN1d stabilization)
+#   - drop_last=True on train DataLoader (BN1d safety)
+#   - Dynamic 3-class severity mapping at load time (Phase 0 files read-only)
+# ---------------------------------------------------------------------------
+phase1_1:
+  # Architecture
+  model:       "efficientnet_b0_v2"
+  pretrained:  true
+  num_classes: 3   # Healthy=0, Low_Severity=1, High_Severity=2
+
+  # Input resolution -- deterministic Bilinear resize (ALL splits, not augmentation).
+  # Mask derived from original 128x64 array, resized via NEAREST (stays binary).
+  # 128x64 -> 224x112: preserves 2:1 aspect ratio.
+  resize_h: 224
+  resize_w: 112
+
+  # Two-stage transfer learning
+  stage_a_epochs: 8    # extended (from 5): backbone frozen + eval() -- BN1d stabilization
+  stage_b_epochs: 45   # features[7] + head fine-tune only; BN pattern: features.eval() + features[7].train()
+
+  # Optimizer: Adam (per-stage weight decay, matching lr_stage_a/lr_stage_b pattern)
+  lr_stage_a:            1.0e-3
+  lr_stage_b:            1.0e-4
+  weight_decay_stage_a:  1.0e-4   # mild L2 during random-init head warm-up
+  weight_decay_stage_b:  1.0e-3   # strong L2 during selective backbone fine-tuning
+
+  # Gradient clipping (Stage B only)
+  max_grad_norm: 1.0
+
+  # Scheduler: CosineAnnealingLR (T_max per-stage, same as Phase 1.0)
+  scheduler: "cosine"
+  eta_min:   1.0e-6
+
+  # DataLoader (GTX 1650 defaults -- AGENTS.md)
+  # drop_last: true on train loader -- hardcoded in script (BN1d crash prevention)
+  batch_size:  16
+  num_workers: 2
+  pin_memory:  true
+
+  # On-the-fly augmentation (train split only, AFTER bilinear resize+mask)
+  # Augmentation uses NEAREST interpolation (after bilinear preprocessing step).
+  # RandomHorizontalFlip: NO config entry -- disabled (Phase 0.7 canonical flip).
+  # RandomVerticalFlip:   NO config entry -- disabled (anatomically invalid).
+  augment_rotation_deg:      10
+  augment_translate:         0.05
+  augment_scale_min:         0.95
+  augment_scale_max:         1.05
+  augment_erasing_p:         0.1
+  augment_erasing_scale_min: 0.02
+  augment_erasing_scale_max: 0.05   # confirmed: same as Phase 1.0 (0.33 was a typo)
+  augment_erasing_ratio_min: 0.3
+  augment_erasing_ratio_max: 3.3
+  augment_erasing_value:     0
+  augment_noise_std:         0.01
+
+  # Head architecture (read by build_efficientnet_b0_v2)
+  head_bottleneck_dim: 256    # Linear(2560, 256)
+  head_dropout_1:      0.4    # Dropout before bottleneck linear
+  head_dropout_2:      0.3    # Dropout before final linear
+
+  # Normalization: keep [0,1] as-is (locked from Phase 1.0)
+  normalize_mean_std: false
+
+  # 3-class severity mapping (applied dynamically at load time -- Phase 0 files untouched)
+  # Healthy=0, Low_Severity(DM_Grade0/1/2)=1, High_Severity(DM_Grade3/4)=2
+  # Val Low_Severity count: 14 samples (4xDM_Grade0 + 4xDM_Grade1 + 6xDM_Grade2)
+
+  # Outputs (project-relative)
+  out_checkpoint_best: "outputs/phase1_1_upgraded/checkpoints/phase1_1_best_val_f1.pth"
+  out_checkpoint_last: "outputs/phase1_1_upgraded/checkpoints/phase1_1_last_epoch.pth"
+  out_metrics_log:     "outputs/phase1_1_upgraded/metrics/phase1_1_training_log.csv"
+  out_test_report:     "outputs/phase1_1_upgraded/metrics/phase1_1_test_classification_report.csv"
+  out_test_preds:      "outputs/phase1_1_upgraded/metrics/phase1_1_test_predictions.csv"
+  out_curves_plot:     "outputs/phase1_1_upgraded/plots/phase1_1_training_curves.png"
+  out_cm_plot:         "outputs/phase1_1_upgraded/plots/phase1_1_confusion_matrix.png"
+
+  # Phase 1.1 Benchmark Results (Executed 2026-08-10):
+  # Best Checkpoint: Epoch 10 (Stage B, first epoch of fine-tuning)
+  # Best Val Weighted-F1: 0.7606
+  # Best Val Macro-F1:    0.7613
+  # Test Accuracy:        0.6923  (36/52)
+  # Test Weighted-F1:     0.7024
+  # Test Macro-F1:        0.6791
+  # Per-class test results (3-class):
+  #   Healthy:       precision=0.57, recall=0.86, f1=0.69  (support=14)
+  #   Low_Severity:  precision=0.53, recall=0.57, f1=0.55  (support=14)
+  #   High_Severity: precision=1.00, recall=0.67, f1=0.80  (support=24)
+  # vs Phase 1.0 (6-class): acc=38.46%, wF1=0.3267, mF1=0.2169
+  # Improvement: +30.8pp accuracy, +0.3757 weighted-F1, +0.4622 macro-F1
+
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Phase 1.2 — EfficientNet-B0 Regional (Spatial Angiosome Pooling Ablation)
+# Upgrades over Phase 1.1:
+  #   - SpatialConcatPool2d (2x2 quadrant GAP+GMP) -> 10240-dim (vs 2560 in Phase 1.1)
+  #     Dim: 1280ch x 4 quadrant_vals (from (2,2) pool) x 2 (GAP+GMP) = 10240
+#   - OrdinalWeightedCELoss (under_penalty=2.0, over_penalty=1.0)
+#   - Checkpoint probability ensemble (primary) + weight averaging + BN recal (secondary)
+#   - Test-time augmentation (8 views, half training range)
+#   - Subject-level evaluation reporting
+#   - features[8] optional ablation toggle (default: false)
+# ---------------------------------------------------------------------------
+phase1_2:
+  # Architecture
+  model:       "efficientnet_b0_v3"
+  pretrained:  true
+  num_classes: 3   # Healthy=0, Low_Severity=1, High_Severity=2
+
+  # Input resolution -- same as Phase 1.1 (bilinear + NEAREST mask from original)
+  resize_h: 224
+  resize_w: 112
+
+  # Two-stage transfer learning (identical schedule to Phase 1.1)
+  stage_a_epochs: 8
+  stage_b_epochs: 45
+
+  # Optimizer: Adam (per-stage weight decay)
+  lr_stage_a:           1.0e-3
+  lr_stage_b:           1.0e-4
+  weight_decay_stage_a: 1.0e-4
+  weight_decay_stage_b: 1.0e-3
+  max_grad_norm:        1.0
+
+  # Scheduler: CosineAnnealingLR
+  scheduler: "cosine"
+  eta_min:   1.0e-6
+
+  # DataLoader (GTX 1650 defaults -- AGENTS.md)
+  # drop_last: true on train loader -- hardcoded in script (BN1d crash prevention)
+  batch_size:  16
+  num_workers: 2
+  pin_memory:  true
+
+  # On-the-fly augmentation (train split only, identical to Phase 1.1)
+  augment_rotation_deg:      10
+  augment_translate:         0.05
+  augment_scale_min:         0.95
+  augment_scale_max:         1.05
+  augment_erasing_p:         0.1
+  augment_erasing_scale_min: 0.02
+  augment_erasing_scale_max: 0.05
+  augment_erasing_ratio_min: 0.3
+  augment_erasing_ratio_max: 3.3
+  augment_erasing_value:     0
+  augment_noise_std:         0.01
+
+  # Head architecture (SpatialConcatPool2d: 1280 * 4 quadrant_vals * 2 (GAP+GMP) = 10240)
+  head_bottleneck_dim: 256    # Linear(10240, 256)
+  head_dropout_1:      0.4    # Dropout before bottleneck linear
+  head_dropout_2:      0.3    # Dropout before final linear
+
+  # Ordinal-aware loss (training only; val/test use plain CrossEntropyLoss)
+  ordinal_under_penalty: 2.0  # under-estimation penalty multiplier
+  ordinal_over_penalty:  1.0  # over-estimation penalty multiplier
+
+  # features[8] optional ablation toggle (default: false -- isolate primary changes first)
+  unfreeze_features8: false
+
+  # Plateau checkpoints for ensemble averaging (absolute epoch numbers)
+  stage_b_checkpoint_epochs: [30, 35, 40, 45, 50]
+
+  # Test-time augmentation (conservative: half the training range)
+  tta_n_augments:  8     # 1 original + 7 augmented views
+  tta_rotation_deg: 5
+  tta_translate:   0.03
+  tta_scale_min:   0.97
+  tta_scale_max:   1.03
+
+  # BN recalibration after weight averaging (secondary approach)
+  bn_recal_n_batches: 20  # via cycle(train_loader): 20 > 14 loader batches, covers full set
+
+  # Normalization: keep [0,1] as-is (locked from Phase 1.0)
+  normalize_mean_std: false
+
+  # Outputs (project-relative)
+  out_checkpoint_best:  "outputs/phase1_2_regional/checkpoints/phase1_2_best_val_f1.pth"
+  out_checkpoint_last:  "outputs/phase1_2_regional/checkpoints/phase1_2_last_epoch.pth"
+  out_metrics_log:      "outputs/phase1_2_regional/metrics/phase1_2_training_log.csv"
+  out_test_report:      "outputs/phase1_2_regional/metrics/phase1_2_test_classification_report.csv"
+  out_test_preds:       "outputs/phase1_2_regional/metrics/phase1_2_test_predictions.csv"
+  out_subject_report:   "outputs/phase1_2_regional/metrics/phase1_2_test_subject_report.csv"
+  out_curves_plot:      "outputs/phase1_2_regional/plots/phase1_2_training_curves.png"
+  out_cm_plot:          "outputs/phase1_2_regional/plots/phase1_2_confusion_matrix.png"
+  out_checkpoint_avg:   "outputs/phase1_2_regional/checkpoints/phase1_2_avg_weight.pth"
+
+# ---------------------------------------------------------------------------
+# Phase 2 — ViT-Tiny (placeholder)
+# ---------------------------------------------------------------------------
+phase2:
+  out_checkpoint_best: "outputs/phase2_vit/checkpoints/phase2_best_val_f1.pth"
+  out_checkpoint_last: "outputs/phase2_vit/checkpoints/phase2_last_epoch.pth"
+  out_metrics_log:     "outputs/phase2_vit/metrics/phase2_training_log.csv"
+  out_test_report:     "outputs/phase2_vit/metrics/phase2_test_classification_report.csv"
+  out_test_preds:      "outputs/phase2_vit/metrics/phase2_test_predictions.csv"
+  out_curves_plot:     "outputs/phase2_vit/plots/phase2_training_curves.png"
+  out_cm_plot:         "outputs/phase2_vit/plots/phase2_confusion_matrix.png"
+
+# ---------------------------------------------------------------------------
+# Phase 3 — Hybrid CNN+ViT (placeholder)
+# ---------------------------------------------------------------------------
+phase3:
+  out_checkpoint_best: "outputs/phase3_hybrid/checkpoints/phase3_best_val_f1.pth"
+  out_checkpoint_last: "outputs/phase3_hybrid/checkpoints/phase3_last_epoch.pth"
+  out_metrics_log:     "outputs/phase3_hybrid/metrics/phase3_training_log.csv"
+  out_test_report:     "outputs/phase3_hybrid/metrics/phase3_test_classification_report.csv"
+  out_test_preds:      "outputs/phase3_hybrid/metrics/phase3_test_predictions.csv"
+  out_curves_plot:     "outputs/phase3_hybrid/plots/phase3_training_curves.png"
+  out_cm_plot:         "outputs/phase3_hybrid/plots/phase3_confusion_matrix.png"

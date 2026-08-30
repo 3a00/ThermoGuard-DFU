@@ -1,0 +1,74 @@
+# ==============================================================================
+# ThermoGuard-DFU — .gitignore
+# ==============================================================================
+
+# --- Python & Bytecode ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# --- Virtual Environments ---
+venv/
+env/
+ENV/
+.venv/
+env.bak/
+venv.bak/
+
+# --- IDEs & OS Files ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# --- Raw & External Datasets ---
+# Exclude the large raw IEEE dataset directory
+IEE data port(original)/
+*.zip
+*.tar.gz
+*.csv.gz
+
+# --- Processed Data (Generated / Reproducible) ---
+# Preprocessed arrays (.npy) and colormap images (.png) should be generated via preprocessing pipeline
+data/processed/
+
+# Keep data manifests tracked (do NOT ignore these CSVs)
+!data/subject_manifest.csv
+!data/subject_manifest_unsplit.csv
+!data/file_traceability_manifest.csv
+
+# --- Model Checkpoints & Large Weights ---
+*.pth
+*.pt
+*.onnx
+*.ckpt
+*.h5
+*.tflite
+outputs/*/checkpoints/
+
+# --- Temporary & Agent Scratch Dirs ---
+.alvar/
+*.log
+scratch/

@@ -1,0 +1,7 @@
+class,precision,recall,f1,support
+Healthy,0.590909,0.928571,0.722222,14
+Low_Severity,0.714286,0.714286,0.714286,14
+High_Severity,0.9375,0.625,0.75,24
+accuracy,,,0.730769,52
+macro avg,0.747565,0.755952,0.728836,52
+weighted avg,0.784091,0.730769,0.732906,52
