@@ -198,7 +198,7 @@ class ThermalDataset(Dataset):
         if split not in ('train', 'val', 'test'):
             raise ValueError(f"split must be 'train', 'val', or 'test', got '{split}'.")
         if phase not in ('1_0', '1_1', '1_2', '2'):
-            raise ValueError(f"split must be 'train', 'val', or 'test', got '{split}'.")
+            raise ValueError(f"phase must be '1_0', '1_1', '1_2', or '2', got '{phase}'.")
         self.split = split
         self.phase = phase
         self.augment = augment and (split == 'train')

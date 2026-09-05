@@ -13,11 +13,39 @@ Key architectural details:
   - Head: Dropout(0.3) -> Linear(192, 3).
   - Transfer learning:
       * Stage A: freeze_backbone() freezes patch embed and all 12 blocks, setting
-        backbone to eval() mode to eliminate stochastic dropout/drop-path noise.
+        backbone to eval() mode. Note: timm's default vit_tiny_patch16_224 ships with
+        drop_path_rate=0.0, pos_drop.p=0.0, and all attn/proj drops at 0.0, so the
+        .eval() call is defensive insurance rather than an active fix — kept in place
+        so a future drop_path_rate>0 variant works without code changes.
       * Stage B: unfreeze_stage_b() unfreezes blocks 10, 11, final norm, and head,
         setting only these active modules to train() mode while keeping early blocks
         in eval() mode.
+
+CRITICAL TRAINING LOOP CONTRACT:
+  Do NOT call model.train() in the training loop. PyTorch's model.train() recursively
+  sets training=True on ALL submodules, silently undoing the selective eval() freeze
+  on blocks 0-9 every single epoch with no error or warning.
+
+  Correct pattern — call the stage helper once per stage transition, never call
+  model.train() directly:
+
+      # Stage A setup (once, before Stage A loop):
+      freeze_backbone(model)
+      for epoch in range(stage_a_epochs):
+          # NO model.train() call here
+          assert_stage_a_modes(model)   # tripwire: raises if invariant is broken
+          for batch in train_loader: ...
+
+      # Stage B setup (once, before Stage B loop):
+      unfreeze_stage_b(model)
+      for epoch in range(stage_b_epochs):
+          # NO model.train() call here
+          assert_stage_b_modes(model)   # tripwire: raises if invariant is broken
+          for batch in train_loader: ...
+
+  The assert_stage_*_modes() helpers are provided in this module.
 """
+
 
 import logging
 from typing import Tuple
@@ -168,6 +196,69 @@ def unfreeze_stage_b(model: ViTTinyThermal, unfreeze_blocks: int = 2) -> None:
         'Trainable parameters: %d',
         unfreeze_blocks, start_block, total_blocks - 1, trainable,
     )
+
+
+def assert_stage_a_modes(model: ViTTinyThermal) -> None:
+    """Tripwire: raise RuntimeError if Stage A training mode invariants are violated.
+
+    Call at the top of every Stage A epoch. Guards against model.train() accidentally
+    resetting backbone submodules back to train() mode, which silently defeats the
+    eval() freeze without any PyTorch error or warning.
+
+    Raises:
+        RuntimeError: If the backbone is in train() mode or head is in eval() mode.
+    """
+    if model.backbone.training:
+        raise RuntimeError(
+            "Stage A mode violation: model.backbone is in train() mode. "
+            "A call to model.train() has overridden the freeze set by freeze_backbone(). "
+            "Do not call model.train() in the training loop — use freeze_backbone() exclusively."
+        )
+    if not model.head.training:
+        raise RuntimeError(
+            "Stage A mode violation: model.head is in eval() mode. "
+            "Call freeze_backbone() to restore correct Stage A modes."
+        )
+
+
+def assert_stage_b_modes(model: ViTTinyThermal, unfreeze_blocks: int = 2) -> None:
+    """Tripwire: raise RuntimeError if Stage B training mode invariants are violated.
+
+    Call at the top of every Stage B epoch. Guards against model.train() accidentally
+    resetting early frozen blocks back to train() mode.
+
+    Args:
+        model: ViTTinyThermal instance.
+        unfreeze_blocks: Number of top blocks that should be in train() mode (default: 2).
+
+    Raises:
+        RuntimeError: If any frozen block is in train() mode, or any active block is in eval() mode.
+    """
+    total_blocks = len(model.backbone.blocks)
+    start_block = total_blocks - unfreeze_blocks
+
+    # Check early (frozen) blocks are all in eval mode
+    for i in range(start_block):
+        if model.backbone.blocks[i].training:
+            raise RuntimeError(
+                f"Stage B mode violation: backbone.blocks[{i}] is in train() mode. "
+                f"A call to model.train() has overridden the selective freeze. "
+                f"Do not call model.train() in the training loop — use unfreeze_stage_b() exclusively."
+            )
+
+    # Check active (unfrozen) blocks are in train mode
+    for i in range(start_block, total_blocks):
+        if not model.backbone.blocks[i].training:
+            raise RuntimeError(
+                f"Stage B mode violation: backbone.blocks[{i}] is in eval() mode. "
+                f"Call unfreeze_stage_b() to restore correct Stage B modes."
+            )
+
+    if not model.head.training:
+        raise RuntimeError(
+            "Stage B mode violation: model.head is in eval() mode. "
+            "Call unfreeze_stage_b() to restore correct Stage B modes."
+        )
 
 
 def build_vit_tiny(
