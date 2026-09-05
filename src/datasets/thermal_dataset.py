@@ -197,14 +197,14 @@ class ThermalDataset(Dataset):
         """Load and filter manifest rows for the specified split."""
         if split not in ('train', 'val', 'test'):
             raise ValueError(f"split must be 'train', 'val', or 'test', got '{split}'.")
-        if phase not in ('1_0', '1_1', '1_2'):
-            raise ValueError(f"phase must be '1_0', '1_1', or '1_2', got '{phase}'.")
+        if phase not in ('1_0', '1_1', '1_2', '2'):
+            raise ValueError(f"split must be 'train', 'val', or 'test', got '{split}'.")
         self.split = split
         self.phase = phase
         self.augment = augment and (split == 'train')
         df = pd.read_csv(manifest_path)
         self.df = df[df['split'] == split].reset_index(drop=True)
-        cfg_key = {'1_0': 'phase1_0', '1_1': 'phase1_1', '1_2': 'phase1_2'}[phase]
+        cfg_key = {'1_0': 'phase1_0', '1_1': 'phase1_1', '1_2': 'phase1_2', '2': 'phase2'}[phase]
         cfg = _CFG[cfg_key]
         self.resize_h: int = cfg['resize_h']
         self.resize_w: int = cfg['resize_w']

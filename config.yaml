@@ -370,14 +370,67 @@ phase1_2:
   out_checkpoint_avg:   "outputs/phase1_2_regional/checkpoints/phase1_2_avg_weight.pth"
 
 # ---------------------------------------------------------------------------
-# Phase 2 — ViT-Tiny (placeholder)
+# Phase 2 — ViT-Tiny Vision Transformer Baseline
 # ---------------------------------------------------------------------------
 phase2:
+  # Architecture
+  model:           "vit_tiny_patch16_224"
+  pretrained:      true
+  num_classes:     3   # Healthy=0, Low_Severity=1, High_Severity=2
+  dropout:         0.3
+  unfreeze_blocks: 2   # Number of top transformer blocks to unfreeze in Stage B (blocks 10 & 11)
+
+  # Input resolution & patch-aligned padding
+  # (128x64 -> 224x112 via bilinear+mask; padded to 224x224 inside model)
+  resize_h:  224
+  resize_w:  112
+  pad_left:  48   # 48 = 3 patches of 16px (pure background zeros)
+  pad_right: 64   # 64 = 4 patches of 16px (pure background zeros); 112 = 7 patches (pure content)
+
+  # Two-stage transfer learning
+  stage_a_epochs: 8    # backbone frozen in eval() mode, train head only
+  stage_b_epochs: 45   # blocks 10-11, norm, and head in train() mode; blocks 0-9 in eval() mode
+
+  # Optimizer: Adam (per-stage weight decay)
+  lr_stage_a:           1.0e-3
+  lr_stage_b:           1.0e-4
+  weight_decay_stage_a: 1.0e-4
+  weight_decay_stage_b: 1.0e-3
+  max_grad_norm:        1.0
+
+  # Scheduler: CosineAnnealingLR
+  scheduler: "cosine"
+  eta_min:   1.0e-6
+
+  # DataLoader (GTX 1650 defaults — AGENTS.md)
+  batch_size:  16
+  num_workers: 2
+  pin_memory:  true
+
+  # On-the-fly augmentation (train split only, identical to Phase 1.1/1.2)
+  augment_rotation_deg:      10
+  augment_translate:         0.05
+  augment_scale_min:         0.95
+  augment_scale_max:         1.05
+  augment_erasing_p:         0.1
+  augment_erasing_scale_min: 0.02
+  augment_erasing_scale_max: 0.05
+  augment_erasing_ratio_min: 0.3
+  augment_erasing_ratio_max: 3.3
+  augment_erasing_value:     0
+  augment_noise_std:         0.01
+
+  # Ordinal-aware loss (training only; val/test use plain CrossEntropyLoss)
+  ordinal_under_penalty: 2.0
+  ordinal_over_penalty:  1.0
+
+  # Outputs (project-relative)
   out_checkpoint_best: "outputs/phase2_vit/checkpoints/phase2_best_val_f1.pth"
   out_checkpoint_last: "outputs/phase2_vit/checkpoints/phase2_last_epoch.pth"
   out_metrics_log:     "outputs/phase2_vit/metrics/phase2_training_log.csv"
   out_test_report:     "outputs/phase2_vit/metrics/phase2_test_classification_report.csv"
   out_test_preds:      "outputs/phase2_vit/metrics/phase2_test_predictions.csv"
+  out_subject_report:  "outputs/phase2_vit/metrics/phase2_test_subject_report.csv"
   out_curves_plot:     "outputs/phase2_vit/plots/phase2_training_curves.png"
   out_cm_plot:         "outputs/phase2_vit/plots/phase2_confusion_matrix.png"
 
