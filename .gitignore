@@ -73,5 +73,6 @@ outputs/*/checkpoints/
 *.log
 scratch/
 
-
 external llm reviews
+.play ground for learning
+.agents/skills/

@@ -433,6 +433,7 @@ phase2:
   out_subject_report:  "outputs/phase2_vit/metrics/phase2_test_subject_report.csv"
   out_curves_plot:     "outputs/phase2_vit/plots/phase2_training_curves.png"
   out_cm_plot:         "outputs/phase2_vit/plots/phase2_confusion_matrix.png"
+  out_tensorboard_dir: "outputs/phase2_vit/tensorboard"
 
 # ---------------------------------------------------------------------------
 # Phase 3 — Hybrid CNN+ViT (placeholder)
