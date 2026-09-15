@@ -62,7 +62,7 @@ class TestViTTinyThermal(unittest.TestCase):
         self.assertEqual(logits_3ch.shape, (2, 3))
 
     def test_02_stage_a_gradient_isolation(self) -> None:
-        """Assert Stage A mode gradients exist only for head, zero for backbone."""
+        """Assert Stage A mode gradients exist only for head, zero for backbone. Runs on CPU."""
         freeze_backbone(self.model)
         self.model.zero_grad()
 
@@ -90,7 +90,7 @@ class TestViTTinyThermal(unittest.TestCase):
         self.assertTrue(head_grad_found, "Head gradients are all zero in Stage A.")
 
     def test_03_stage_b_gradient_isolation(self) -> None:
-        """Assert Stage B mode gradients exist for blocks[10:12], norm, head; zero for patch_embed, blocks[0:10]."""
+        """Assert Stage B mode gradients exist for blocks[10:12], norm, head; zero for patch_embed, blocks[0:10]. Runs on CPU."""
         unfreeze_stage_b(self.model, unfreeze_blocks=2)
         self.model.zero_grad()
 
@@ -152,7 +152,14 @@ class TestViTTinyThermal(unittest.TestCase):
         self.assertTrue(head_grad_found, "Head gradients are all zero in Stage B.")
 
     def test_04_peak_cuda_memory(self) -> None:
-        """Assert peak CUDA memory under FP16 autocast stays below 3.5GB threshold."""
+        """Assert peak CUDA memory under FP16 autocast stays below 3.5 GB threshold.
+
+        Uses pretrained=True to load actual ImageNet weights into VRAM, matching the
+        real training configuration. Measures architecture + activation overhead for one
+        forward+backward step only. Does NOT include Adam optimizer moment state, which
+        adds ~7 MB for Stage B's 890k trainable parameters — negligible relative to the
+        threshold but worth knowing.
+        """
         if not torch.cuda.is_available():
             self.skipTest("CUDA not available on this host environment.")
 
@@ -160,42 +167,55 @@ class TestViTTinyThermal(unittest.TestCase):
         torch.cuda.empty_cache()
         torch.cuda.reset_peak_memory_stats()
 
-        cuda_model = build_vit_tiny(num_classes=3, pretrained=False, dropout=0.3).to(device)
-        unfreeze_stage_b(cuda_model, unfreeze_blocks=2)
+        cuda_model = None
+        optimizer = None
+        scaler = None
+        x = None
+        targets = None
+        out = None
+        loss = None
 
-        optimizer = torch.optim.Adam(
-            [p for p in cuda_model.parameters() if p.requires_grad],
-            lr=1e-4,
-        )
-        criterion = nn.CrossEntropyLoss()
-        scaler = torch.amp.GradScaler('cuda')
+        try:
+            # pretrained=True: loads ImageNet weights into VRAM, matching actual training.
+            cuda_model = build_vit_tiny(num_classes=3, pretrained=True, dropout=0.3).to(device)
+            unfreeze_stage_b(cuda_model, unfreeze_blocks=2)
 
-        x = torch.randn(16, 1, 224, 112, device=device)
-        targets = torch.randint(0, 3, (16,), device=device)
+            optimizer = torch.optim.Adam(
+                [p for p in cuda_model.parameters() if p.requires_grad],
+                lr=1e-4,
+            )
+            criterion = nn.CrossEntropyLoss()
+            scaler = torch.amp.GradScaler('cuda')
 
-        optimizer.zero_grad()
-        with torch.amp.autocast('cuda'):
-            out = cuda_model(x)
-            loss = criterion(out, targets)
+            x = torch.randn(16, 1, 224, 112, device=device)
+            targets = torch.randint(0, 3, (16,), device=device)
 
-        scaler.scale(loss).backward()
-        scaler.step(optimizer)
-        scaler.update()
+            optimizer.zero_grad()
+            with torch.amp.autocast('cuda'):
+                out = cuda_model(x)
+                loss = criterion(out, targets)
 
-        peak_bytes = torch.cuda.max_memory_allocated(device=device)
-        peak_gb = peak_bytes / (1024 ** 3)
-        logging.info("Peak CUDA memory allocated during forward + backward: %.3f GB", peak_gb)
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
 
-        # Clean up GPU memory
-        del cuda_model, x, targets, out, loss, optimizer, scaler
-        torch.cuda.empty_cache()
+            peak_bytes = torch.cuda.max_memory_allocated(device=device)
+            peak_gb = peak_bytes / (1024 ** 3)
+            logging.info(
+                "Peak CUDA memory (pretrained=True, FP16 AMP, batch=16, Stage B): %.3f GB",
+                peak_gb,
+            )
 
-        vram_threshold_gb = 3.5
-        self.assertLess(
-            peak_gb,
-            vram_threshold_gb,
-            f"Peak VRAM usage ({peak_gb:.3f} GB) exceeded safety threshold of {vram_threshold_gb} GB.",
-        )
+            vram_threshold_gb = 3.5
+            self.assertLess(
+                peak_gb,
+                vram_threshold_gb,
+                f"Peak VRAM usage ({peak_gb:.3f} GB) exceeded safety threshold of {vram_threshold_gb} GB.",
+            )
+        finally:
+            # Runs even if the assertion fires, preventing VRAM leaks in the test runner.
+            del loss, out, targets, x, scaler, optimizer, cuda_model
+            torch.cuda.empty_cache()
 
     def test_05_stage_a_train_footgun_tripwire(self) -> None:
         """Assert assert_stage_a_modes raises RuntimeError when model.train() overrides freeze."""
