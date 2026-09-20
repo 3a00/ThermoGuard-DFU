@@ -1,0 +1,26 @@
+{
+  "phase": "phase2",
+  "checkpoint_epoch": 35,
+  "stage_provenance": "Stage B (Selective Fine-Tuning, Epoch 27/45)",
+  "total_test_feet": 52,
+  "total_test_subjects": 26,
+  "test_accuracy": 0.884615,
+  "test_weighted_f1": 0.884225,
+  "test_macro_f1": 0.877364,
+  "high_severity_recall_pct": 87.5,
+  "low_severity_recall_pct": 78.57,
+  "healthy_recall_pct": 100.0,
+  "total_errors": 6,
+  "under_estimation_errors": 5,
+  "over_estimation_errors": 1,
+  "under_estimation_rate_pct": 83.33,
+  "anti_mirror_check_passed": false,
+  "anti_mirror_balanced_gate": false,
+  "beats_phase1_1_baseline_gate": true,
+  "subject_level": {
+    "both_feet_correct": 20,
+    "both_feet_wrong": 0,
+    "split_discordant": 6,
+    "subject_accuracy_pct": 76.92
+  }
+}

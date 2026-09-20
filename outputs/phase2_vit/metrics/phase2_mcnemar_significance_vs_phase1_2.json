@@ -1,0 +1,16 @@
+{
+  "comparison": "Phase 2 ViT-Tiny vs Phase 1.2 EfficientNet-B0 (Single Checkpoint)",
+  "n_test_feet": 52,
+  "contingency_table": {
+    "both_correct_a": 35,
+    "p2_correct_p12_wrong_b": 11,
+    "p2_wrong_p12_correct_c": 3,
+    "both_wrong_d": 3
+  },
+  "discordant_pairs_b_plus_c": 14,
+  "exact_binomial_p_value": 0.057373,
+  "mcnemar_chi2_statistic": 3.5,
+  "mcnemar_chi2_p_value": 0.061369,
+  "statistically_significant_alpha_0_05": false,
+  "interpretation": "Performance difference is NOT statistically significant (p = 0.0574 >= 0.05). The difference (11 vs 3 discordant predictions) is consistent with random sampling noise on n=52."
+}

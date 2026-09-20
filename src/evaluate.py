@@ -26,6 +26,9 @@ Usage:
     # Phase 1.2 -- weight averaging + BN recalibration (secondary comparison)
     python src/evaluate.py --phase phase1_2 --use-weight-avg
 
+    # Phase 2 -- ViT-Tiny single best checkpoint
+    python src/evaluate.py --phase phase2
+
 Phase 1.2 outputs (all paths from config.yaml['phase1_2']):
   - Confusion matrix PNG (foot-level)
   - Classification report CSV (per-class precision/recall/F1)
@@ -34,6 +37,7 @@ Phase 1.2 outputs (all paths from config.yaml['phase1_2']):
 """
 
 import argparse
+import json
 import logging
 import os
 import sys
@@ -44,6 +48,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from scipy import stats
 import torch
 import torch.nn as nn
 import yaml
@@ -66,6 +71,7 @@ from models.efficientnet import (
     build_efficientnet_b0_v2,
     build_efficientnet_b0_v3,
 )
+from models.vit_tiny import build_vit_tiny
 
 logging.basicConfig(
     level=logging.INFO,
@@ -91,18 +97,19 @@ def save_confusion_matrix(cm: np.ndarray, out_path: str, label_names: list) -> N
     cm_norm = cm.astype(float) / cm.sum(axis=1, keepdims=True).clip(min=1)
     fig, ax = plt.subplots(figsize=(max(6, len(label_names) * 1.5), max(5, len(label_names) * 1.3)))
     im = ax.imshow(cm_norm, interpolation='nearest', cmap='Blues')
-    fig.colorbar(im, ax=ax)
+    fig.colorbar(im, ax=ax, label='Recall (Row Fraction)')
     ax.set_xticks(range(len(label_names)))
     ax.set_yticks(range(len(label_names)))
     ax.set_xticklabels(label_names, rotation=45, ha='right')
     ax.set_yticklabels(label_names)
-    ax.set_xlabel('Predicted Label')
-    ax.set_ylabel('True Label')
-    ax.set_title('ThermoGuard-DFU -- Test Confusion Matrix (Normalized)')
-    for r in range(len(label_names)):
-        for c in range(len(label_names)):
-            ax.text(c, r, f'{cm_norm[r, c]:.2f}', ha='center', va='center',
-                    color='white' if cm_norm[r, c] > 0.5 else 'black', fontsize=9)
+    is_3class = (len(label_names) == 3)
+    ax.set_xlabel('Predicted Severity Class' if is_3class else 'Predicted Label')
+    ax.set_ylabel('True Severity Class (Row sum = 1.0)' if is_3class else 'True Label (Row sum = 1.0)')
+    ax.set_title('ThermoGuard-DFU -- Test Confusion Matrix (Row-Normalized / Recall)')
+    for row_idx in range(len(label_names)):
+        for col_idx in range(len(label_names)):
+            ax.text(col_idx, row_idx, f'{cm_norm[row_idx, col_idx]:.2f}', ha='center', va='center',
+                    color='white' if cm_norm[row_idx, col_idx] > 0.5 else 'black', fontsize=9)
     fig.tight_layout()
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     fig.savefig(out_path, dpi=150)
@@ -339,8 +346,8 @@ def compute_subject_level_metrics(
     rows = []
     for subj_id, grp in test_df.groupby('subject_id'):
         grp = grp.reset_index(drop=True)
-        true_cls = grp['true_3class'].iloc[0]  # L/R labels are always identical
-        preds = grp['pred_idx'].tolist()
+        true_cls = int(grp['true_3class'].iloc[0])  # L/R labels are always identical
+        preds = [int(p) for p in grp['pred_idx'].tolist()]
         sides = grp['side'].tolist()
         pred_by_side = {s: p for s, p in zip(sides, preds)}
         pred_left  = pred_by_side.get('L', None)
@@ -373,6 +380,87 @@ def log_subject_level_summary(subject_df: pd.DataFrame, pred_col_label: str) -> 
         n_wrong, n_split,
     )
     logging.info('Phase 1.1 reference: 16/26 correct, 6/26 wrong, 4/26 split')
+
+
+def run_mcnemar_test(
+    phase2_preds_df: pd.DataFrame,
+    phase1_2_preds_csv_path: str,
+    out_json_path: str,
+) -> None:
+    """Run McNemar's paired test comparing Phase 2 ViT vs Phase 1.2 CNN on the identical 52 test feet.
+
+    Enforces composite key alignment on ['subject_id', 'side'] to guarantee
+    exact sample-by-sample matching between separate phase prediction files.
+    """
+    if not os.path.exists(phase1_2_preds_csv_path):
+        logging.warning('Phase 1.2 predictions not found at %s. Skipping McNemar test.', phase1_2_preds_csv_path)
+        return
+
+    p12_df = pd.read_csv(phase1_2_preds_csv_path)
+    assert len(p12_df) == 52, f"Phase 1.2 predictions expected 52 rows, got {len(p12_df)}."
+
+    # Key-based alignment on ['subject_id', 'side'] (guards against row-order divergence)
+    merged = pd.merge(
+        phase2_preds_df[['subject_id', 'side', 'true_3class', 'predicted_3class']],
+        p12_df[['subject_id', 'side', 'true_3class', 'predicted_3class']],
+        on=['subject_id', 'side'],
+        suffixes=('_p2', '_p12'),
+        how='inner',
+    )
+    assert len(merged) == 52, (
+        f"Key alignment error: matched {len(merged)}/52 feet between Phase 2 and Phase 1.2 predictions. "
+        "Check subject_id and side keys for divergence."
+    )
+    assert (merged['true_3class_p2'] == merged['true_3class_p12']).all(), (
+        "Ground truth label divergence detected between Phase 2 and Phase 1.2 test files!"
+    )
+
+    p2_correct = (merged['predicted_3class_p2'] == merged['true_3class_p2']).tolist()
+    p12_correct = (merged['predicted_3class_p12'] == merged['true_3class_p12']).tolist()
+
+    both_correct = sum(p2 and p12 for p2, p12 in zip(p2_correct, p12_correct))
+    p2_correct_p12_wrong = sum(p2 and not p12 for p2, p12 in zip(p2_correct, p12_correct))
+    p2_wrong_p12_correct = sum(not p2 and p12 for p2, p12 in zip(p2_correct, p12_correct))
+    both_wrong = sum(not p2 and not p12 for p2, p12 in zip(p2_correct, p12_correct))
+
+    discordant = p2_correct_p12_wrong + p2_wrong_p12_correct
+    if discordant == 0:
+        p_val_exact = 1.0
+        chi2_stat = 0.0
+        p_val_chi2 = 1.0
+    else:
+        binom_res = stats.binomtest(p2_correct_p12_wrong, n=discordant, p=0.5, alternative='two-sided')
+        p_val_exact = float(binom_res.pvalue)
+        chi2_stat = float(((abs(p2_correct_p12_wrong - p2_wrong_p12_correct) - 1.0) ** 2) / discordant)
+        p_val_chi2 = float(stats.chi2(df=1).sf(chi2_stat))
+
+    mcnemar_results = {
+        'comparison': 'Phase 2 ViT-Tiny vs Phase 1.2 EfficientNet-B0 (Single Checkpoint)',
+        'n_test_feet': 52,
+        'contingency_table': {
+            'both_correct_a': int(both_correct),
+            'p2_correct_p12_wrong_b': int(p2_correct_p12_wrong),
+            'p2_wrong_p12_correct_c': int(p2_wrong_p12_correct),
+            'both_wrong_d': int(both_wrong),
+        },
+        'discordant_pairs_b_plus_c': int(discordant),
+        'exact_binomial_p_value': round(p_val_exact, 6),
+        'mcnemar_chi2_statistic': round(chi2_stat, 6),
+        'mcnemar_chi2_p_value': round(p_val_chi2, 6),
+        'statistically_significant_alpha_0_05': bool(p_val_exact < 0.05),
+        'interpretation': (
+            "Performance difference is statistically significant (p < 0.05)"
+            if p_val_exact < 0.05
+            else f"Performance difference is NOT statistically significant (p = {p_val_exact:.4f} >= 0.05). "
+                 f"The difference ({p2_correct_p12_wrong} vs {p2_wrong_p12_correct} discordant predictions) is consistent with random sampling noise on n=52."
+        )
+    }
+
+    os.makedirs(os.path.dirname(out_json_path), exist_ok=True)
+    with open(out_json_path, 'w') as f_out:
+        json.dump(mcnemar_results, f_out, indent=2)
+    logging.info('McNemar paired statistical test saved: %s', out_json_path)
+    logging.info('McNemar result: %s', mcnemar_results['interpretation'])
 
 
 # ---------------------------------------------------------------------------
@@ -456,7 +544,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description='ThermoGuard-DFU Phase-Aware Evaluation')
     parser.add_argument(
         '--phase', type=str, default='phase1_0',
-        help="Config key to use (e.g. 'phase1_0', 'phase1_1', 'phase1_2'). Default: phase1_0",
+        help="Config key to use (e.g. 'phase1_0', 'phase1_1', 'phase1_2', 'phase2'). Default: phase1_0",
     )
     parser.add_argument(
         '--use-tta', action='store_true',
@@ -485,6 +573,7 @@ def main() -> None:
     phase0_out = cfg['phase0_outputs']
     is_phase11 = (args.phase == 'phase1_1')
     is_phase12 = (args.phase == 'phase1_2')
+    is_phase2  = (args.phase == 'phase2')
 
     manifest_path   = project_path(phase0_out['preprocessing_manifest'])
     checkpoint_path = project_path(phase_cfg['out_checkpoint_best'])
@@ -503,8 +592,27 @@ def main() -> None:
 
     ckpt = torch.load(checkpoint_path, map_location=DEVICE, weights_only=False)
 
+    # Checkpoint provenance inspection
+    ckpt_epoch = ckpt.get('epoch', -1)
+    stage_a_cutoff = phase_cfg.get('stage_a_epochs', 8)
+    if ckpt_epoch <= stage_a_cutoff:
+        stage_provenance = f"Stage A (Linear Probe / Backbone Frozen, Epoch {ckpt_epoch}/{stage_a_cutoff})"
+    else:
+        stage_provenance = f"Stage B (Selective Fine-Tuning, Epoch {ckpt_epoch - stage_a_cutoff}/{phase_cfg.get('stage_b_epochs', 45)})"
+    logging.info('Checkpoint loaded: Epoch=%d -> %s, Val Weighted-F1=%.4f',
+                 ckpt_epoch, stage_provenance,
+                 ckpt.get('val_weighted_f1', ckpt.get('best_val_f1', float('nan'))))
+
     # --- Build model ---
-    if is_phase12:
+    if is_phase2:
+        label_names = CLASS_NAMES_3
+        model = build_vit_tiny(
+            num_classes=phase_cfg['num_classes'],
+            pretrained=False,
+            dropout=phase_cfg['dropout'],
+            pad_width=(phase_cfg['pad_left'], phase_cfg['pad_right']),
+        )
+    elif is_phase12:
         label_names = CLASS_NAMES_3
         model = build_efficientnet_b0_v3(
             num_classes=phase_cfg['num_classes'], pretrained=False, cfg=phase_cfg,
@@ -523,13 +631,17 @@ def main() -> None:
     model.load_state_dict(ckpt['model_state_dict'])
     model = model.to(DEVICE)
     model.eval()
-    logging.info(
-        'Checkpoint loaded: epoch=%d, val_weighted_f1=%.4f',
-        ckpt.get('epoch', -1), ckpt.get('val_weighted_f1', ckpt.get('best_val_f1', float('nan'))),
-    )
 
     # --- Dataset ---
-    dataset_phase = '1_2' if is_phase12 else ('1_1' if is_phase11 else '1_0')
+    if is_phase2:
+        dataset_phase = '2'
+    elif is_phase12:
+        dataset_phase = '1_2'
+    elif is_phase11:
+        dataset_phase = '1_1'
+    else:
+        dataset_phase = '1_0'
+
     test_ds = ThermalDataset('test', manifest_path, augment=False, phase=dataset_phase)
     test_loader = DataLoader(
         test_ds,
@@ -550,16 +662,123 @@ def main() -> None:
         all_preds.extend(preds.cpu().tolist())
         all_labels.extend(labels.tolist())
 
+    # Strict alignment assertion tripwires (fixes Round 1 review bug)
+    assert len(all_preds) == len(test_ds.df) == 52, (
+        f"Sample count mismatch: {len(all_preds)} predictions vs {len(test_ds.df)} manifest rows."
+    )
+    if is_phase2 or is_phase11 or is_phase12:
+        expected_labels_3 = [SEVERITY_MAP[c] for c in test_ds.df['model_class']]
+        assert all_labels == expected_labels_3, (
+            "CRITICAL INVARIANT VIOLATION: DataLoader labels do not match test_ds.df sequence! "
+            "Risk of silent subject_id-to-prediction misalignment."
+        )
+
     logging.info(
         '\nClassification Report (single checkpoint):\n%s',
         classification_report(all_labels, all_preds, target_names=label_names, zero_division=0),
     )
-    logging.info('Test Accuracy:     %.4f', accuracy_score(all_labels, all_preds))
-    logging.info('Test Weighted-F1:  %.4f', f1_score(all_labels, all_preds, average='weighted', zero_division=0))
-    logging.info('Test Macro-F1:     %.4f', f1_score(all_labels, all_preds, average='macro',    zero_division=0))
+    acc = accuracy_score(all_labels, all_preds)
+    wf1 = f1_score(all_labels, all_preds, average='weighted', zero_division=0)
+    mf1 = f1_score(all_labels, all_preds, average='macro',    zero_division=0)
+    logging.info('Test Accuracy:     %.4f', acc)
+    logging.info('Test Weighted-F1:  %.4f', wf1)
+    logging.info('Test Macro-F1:     %.4f', mf1)
 
     save_confusion_matrix(confusion_matrix(all_labels, all_preds), out_cm_path, label_names)
     save_classification_report_csv(all_labels, all_preds, label_names, out_report_csv)
+
+    # ---------------------------------------------------------------------------
+    # Phase 2 Specific Output Handling
+    # ---------------------------------------------------------------------------
+    if is_phase2:
+        all_labels_6 = [
+            CLASS_NAMES.index(row['model_class']) for _, row in test_ds.df.iterrows()
+        ]
+        # Foot-level predictions CSV
+        preds_df = pd.DataFrame({
+            'subject_id':        test_ds.df['subject_id'].values,
+            'side':              test_ds.df['side'].values,
+            'true_6class':       [CLASS_NAMES[i]   for i in all_labels_6],
+            'true_3class':       [CLASS_NAMES_3[i] for i in all_labels],
+            'predicted_3class':  [CLASS_NAMES_3[i] for i in all_preds],
+        })
+        os.makedirs(os.path.dirname(project_path(out_preds_csv)), exist_ok=True)
+        preds_df.to_csv(project_path(out_preds_csv), index=False)
+        logging.info('Foot-level predictions CSV saved: %s (%d rows)', out_preds_csv, len(preds_df))
+
+        # Subject-level aggregated report CSV
+        subj_df = compute_subject_level_metrics(test_ds.df, all_preds, 'single')
+        log_subject_level_summary(subj_df, 'single')
+        subject_report_path = project_path(phase_cfg['out_subject_report'])
+        os.makedirs(os.path.dirname(subject_report_path), exist_ok=True)
+        subj_df.to_csv(subject_report_path, index=False)
+        logging.info('Subject-level report CSV saved: %s', subject_report_path)
+
+        # Anti-mirror clinical safety check & calculation
+        logging.info('--- Anti-mirror safety check ---')
+        under_count = sum(1 for true_cls, pred_cls in zip(all_labels, all_preds) if true_cls > pred_cls)
+        over_count  = sum(1 for true_cls, pred_cls in zip(all_labels, all_preds) if pred_cls > true_cls)
+        error_count = sum(1 for true_cls, pred_cls in zip(all_labels, all_preds) if true_cls != pred_cls)
+        logging.info('Errors: total=%d | under-estimation=%d | over-estimation=%d', error_count, under_count, over_count)
+        under_rate = (100.0 * under_count / error_count) if error_count > 0 else 0.0
+        logging.info('Under-estimation rate: %.1f%%', under_rate)
+
+        # Per-class recalls
+        rep = classification_report(all_labels, all_preds, target_names=label_names, output_dict=True, zero_division=0)
+        healthy_rec = rep['Healthy']['recall'] * 100.0
+        low_rec     = rep['Low_Severity']['recall'] * 100.0
+        high_rec    = rep['High_Severity']['recall'] * 100.0
+
+        # Anti-mirror clinical safety criteria (Round 2 review refinement):
+        # 1. anti_mirror_balanced_gate: under-estimation rate <= 50.0% (no systematic bias toward under-diagnosis)
+        # 2. beats_phase1_1_baseline_gate: under-estimation rate < 87.5% (better than Phase 1.1's unweighted baseline)
+        anti_mirror_balanced = bool(under_rate <= 50.0)
+        beats_phase1_1 = bool(under_rate < 87.5) if error_count > 0 else True
+        logging.info(
+            'Anti-mirror check: under-rate=%.1f%% | balanced_gate (<=50%%)=%s | beats_phase1_1 (<87.5%%)=%s',
+            under_rate, anti_mirror_balanced, beats_phase1_1,
+        )
+
+        # Persist comprehensive evaluation summary to JSON
+        summary_data = {
+            'phase': args.phase,
+            'checkpoint_epoch': ckpt_epoch,
+            'stage_provenance': stage_provenance,
+            'total_test_feet': len(all_labels),
+            'total_test_subjects': len(subj_df),
+            'test_accuracy': round(float(acc), 6),
+            'test_weighted_f1': round(float(wf1), 6),
+            'test_macro_f1': round(float(mf1), 6),
+            'high_severity_recall_pct': round(float(high_rec), 2),
+            'low_severity_recall_pct': round(float(low_rec), 2),
+            'healthy_recall_pct': round(float(healthy_rec), 2),
+            'total_errors': int(error_count),
+            'under_estimation_errors': int(under_count),
+            'over_estimation_errors': int(over_count),
+            'under_estimation_rate_pct': round(float(under_rate), 2),
+            'anti_mirror_check_passed': anti_mirror_balanced,
+            'anti_mirror_balanced_gate': anti_mirror_balanced,
+            'beats_phase1_1_baseline_gate': beats_phase1_1,
+            'subject_level': {
+                'both_feet_correct': int(subj_df['subject_correct_single'].sum()),
+                'both_feet_wrong': int((~subj_df['subject_correct_single'] & ~subj_df['split_case']).sum()),
+                'split_discordant': int(subj_df['split_case'].sum()),
+                'subject_accuracy_pct': round(100.0 * subj_df['subject_correct_single'].sum() / len(subj_df), 2),
+            }
+        }
+        anti_mirror_json_path = project_path(phase_cfg.get('out_anti_mirror_json', 'outputs/phase2_vit/metrics/phase2_anti_mirror_summary.json'))
+        os.makedirs(os.path.dirname(anti_mirror_json_path), exist_ok=True)
+        with open(anti_mirror_json_path, 'w') as f_json:
+            json.dump(summary_data, f_json, indent=2)
+        logging.info('Persistent anti-mirror summary JSON saved: %s', anti_mirror_json_path)
+
+        # Paired McNemar's significance test against Phase 1.2 CNN baseline (key-based alignment)
+        phase1_2_preds_csv = project_path(cfg['phase1_2']['out_test_preds'])
+        mcnemar_json_path  = project_path(phase_cfg.get('out_mcnemar_json', 'outputs/phase2_vit/metrics/phase2_mcnemar_significance_vs_phase1_2.json'))
+        run_mcnemar_test(preds_df, phase1_2_preds_csv, mcnemar_json_path)
+
+        logging.info('Phase 2 baseline evaluation complete.')
+        return
 
     # ---------------------------------------------------------------------------
     # Phase 1.0 / 1.1 specific outputs (no further steps)
