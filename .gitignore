@@ -45,7 +45,7 @@ Thumbs.db
 
 # --- Raw & External Datasets ---
 # Exclude the large raw IEEE dataset directory
-IEE data port(original)/
+IEE data port(original)
 *.zip
 *.tar.gz
 *.csv.gz
