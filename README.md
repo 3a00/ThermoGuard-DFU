@@ -23,8 +23,8 @@ Following Architecture Decision Record [0001](docs/adr/0001-three-class-severity
 
 ### Loss Function: Ordinal Weighted Cross-Entropy
 To penalize clinically catastrophic classification errors (e.g., predicting *Healthy* for a *High Severity* patient) more heavily than adjacent mistakes, models are trained with **Ordinal Weighted Cross-Entropy Loss** ([ADR 0002](docs/adr/0002-ordinal-weighted-cross-entropy-loss.md)):
-$$\mathcal{L} = \text{weight}[y] \times \left(1.0 + \text{penalty}(y, \hat{y})\right) \times \mathcal{L}_{\text{CE}}$$
-where underestimating severity carries double the penalty of overestimating ($\text{under\_penalty}=2.0$, $\text{over\_penalty}=1.0$).
+$$\mathcal{L} = w_y \cdot \left(1.0 + \text{penalty}(y, \hat{y})\right) \cdot \mathcal{L}_{\text{CE}}$$
+where underestimating severity carries double the penalty of overestimating (`under_penalty = 2.0`, `over_penalty = 1.0`).
 
 ---
 
@@ -36,6 +36,8 @@ where underestimating severity carries double the penalty of overestimating ($\t
 | **Phase 1.1** | EfficientNet-B0 (3-class) | Bilinear+mask, ConcatPool, selective unfreeze | 69.23% | 0.7024 |
 | **Phase 1.2** | **Regional EfficientNet-B0** | `SpatialConcatPool2d` (2×2), OrdinalCE, TTA + Ensemble | **80.77%** | **0.8104** |
 | **Phase 2.0** | **ViT-Tiny Transformer** | Patch self-attention, aspect-ratio padding, OrdinalCE | **88.46%** | **0.8842** |
+
+> **Note on Model Comparison & Next Steps:** This benchmark presents a baseline architectural comparison between a regional CNN (`EfficientNet-B0`) and a pure Vision Transformer (`ViT-Tiny`). Further performance improvements—including patch resolution ablations, deeper transformer unfreezing, and a planned Phase 3 Hybrid CNN+ViT architecture—will be explored in subsequent experimental runs.
 
 ---
 
