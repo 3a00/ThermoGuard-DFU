@@ -1,0 +1,26 @@
+# -- PyTorch CUDA 12.4 Extra Index --
+--extra-index-url https://download.pytorch.org/whl/cu124
+
+# Deep Learning Framework & Architectures
+torch==2.6.0+cu124
+torchvision==0.21.0+cu124
+timm==1.0.28
+
+# Experiment Tracking & Metrics Visualization
+tensorboard==2.21.0
+matplotlib==3.11.1
+
+# Scientific Computing & Data Analysis
+numpy==2.4.4
+scipy==1.18.0
+pandas==3.0.5
+openpyxl==3.1.5
+scikit-learn==1.9.0
+
+# Image & Thermogram Matrix Processing
+opencv-python>=4.8.0,<=5.0.0.93
+pillow==12.2.0
+
+# Pipeline Configuration & Utilities
+PyYAML==6.0.3
+tqdm==4.70.0
