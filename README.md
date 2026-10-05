@@ -1,60 +1,117 @@
-# ThermoGuard-DFU
+ThermoGuard-DFU
+===============
 
-**Deep Learning-Driven Diabetic Foot Ulcer (DFU) Risk Stratification from Plantar Thermograms**  
-*Graduation Capstone Project*
+ThermoGuard-DFU stratifies diabetic foot ulcer risk from plantar thermograms.
+It reads raw thermal matrices, applies fixed physical temperature normalization,
+and predicts a 3-class neurovascular severity grade.
 
----
 
-## Overview
+Quick start
+-----------
 
-The pipeline is benchmarked on the **IEEE Plantar Thermogram Database** (167 subjects: 122 diabetic, 45 control; 334 feet total) using deterministic subject-level splitting (116 train / 25 val / 26 test) and fixed physical temperature normalization ($[15^\circ\text{C}, 35^\circ\text{C}]$).
+* Environment:
+    python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt
 
----
+* Dataset paths in config.yaml:
+    data:
+      extracted_root: "path/to/ThermoDataBase"
+      excel_path: "path/to/Plantar Thermogram Database.xlsx"
 
-## Clinical Formulation & Class Hierarchy
+* Run Phase 0 data pipeline:
+    python src/pipeline/tci_labeling.py
+    python src/pipeline/data_split.py
+    python src/pipeline/preprocessing.py
+    python src/pipeline/compute_class_weights.py
 
-Following Architecture Decision Record [0001](docs/adr/0001-three-class-severity-grouping.md), the system stratifies patients into three ordinal risk categories:
+* Train and evaluate regional CNN (Phase 1.2):
+    python src/train_phase1_2.py
+    python src/evaluate.py --phase phase1_2
 
-| Class Index | Clinical Category | Included TCI Grades | Clinical Meaning |
-| :---: | :--- | :--- | :--- |
-| **0** | **Healthy** | Control Group (CG) | Normal autonomic regulation, symmetric thermal pattern. |
-| **1** | **Low Severity** | DM Grade 0 & Grade 1 | Early-stage neurovascular dysfunction, mild hyperthermia/hypothermia. |
-| **2** | **High Severity** | DM Grade 2, 3 & 4 | Advanced neuropathy/ischemia, critical ulceration or amputation risk. |
+* Train and evaluate Vision Transformer (Phase 2):
+    python src/train_phase2.py
+    python src/evaluate.py --phase phase2
 
-### Loss Function: Ordinal Weighted Cross-Entropy
-To penalize clinically catastrophic classification errors (e.g., predicting *Healthy* for a *High Severity* patient) more heavily than adjacent mistakes, models are trained with **Ordinal Weighted Cross-Entropy Loss** ([ADR 0002](docs/adr/0002-ordinal-weighted-cross-entropy-loss.md)):
-$$\mathcal{L} = w_y \cdot \left(1.0 + \text{penalty}(y, \hat{y})\right) \cdot \mathcal{L}_{\text{CE}}$$
-where underestimating severity carries double the penalty of overestimating (`under_penalty = 2.0`, `over_penalty = 1.0`).
+* Training telemetry:
+    tensorboard --logdir outputs/phase2_vit/tensorboard/
 
----
+Documentation
+-------------
 
-## Architectural Evolution & Performance
+* Clinical and technical glossary: CONTEXT.md
+* 3-Class clinical severity grouping: docs/adr/0001-three-class-severity-grouping.md
+* Ordinal loss penalty formulation: docs/adr/0002-ordinal-weighted-cross-entropy-loss.md
+* Project rules and hardware constraints: .agents/AGENTS.md
+* Experiment configuration: config.yaml
 
-| Phase | Architecture | Key Novelties | Test Accuracy | Test Weighted F1 |
-| :--- | :--- | :--- | :---: | :---: |
-| **Phase 1.0** | EfficientNet-B0 (6-class) | Nearest-neighbor resize, standard CE | 38.46% | 0.3267 |
-| **Phase 1.1** | EfficientNet-B0 (3-class) | Bilinear+mask, ConcatPool, selective unfreeze | 69.23% | 0.7024 |
-| **Phase 1.2** | **Regional EfficientNet-B0** | `SpatialConcatPool2d` (2×2), OrdinalCE, TTA + Ensemble | **80.77%** | **0.8104** |
-| **Phase 2.0** | **ViT-Tiny Transformer** | Patch self-attention, aspect-ratio padding, OrdinalCE | **88.46%** | **0.8842** |
 
-> **Note on Model Comparison & Next Steps:** This benchmark presents a baseline architectural comparison between a regional CNN (`EfficientNet-B0`) and a pure Vision Transformer (`ViT-Tiny`). Further performance improvements—including patch resolution ablations, deeper transformer unfreezing, and a planned Phase 3 Hybrid CNN+ViT architecture—will be explored in subsequent experimental runs.
+Completed work
+==============
 
----
+Phase 0: Data preparation
+-------------------------
 
-## Phase 1.2 Deep Dive: Regional CNN Architecture
+* Phase 0.5 (TCI labeling):
+  Calculated Thermal Change Index (TCI) ground-truth labels across 167 subjects
+  (122 diabetic, 45 control; 334 feet total) and 4 angiosomes (LCA, LPA, MCA, MPA).
+  - Script: src/pipeline/tci_labeling.py
+  - Artifacts: data/subject_manifest_unsplit.csv, data/file_traceability_manifest.csv
 
-[`src/models/efficientnet.py`](src/models/efficientnet.py) (`EfficientNetThermalV3`)
+* Phase 0.6 (Subject-level split):
+  Split subjects into 116 train, 25 val, and 26 test (232 train, 50 val, 52 test feet)
+  with seed 42. Bilateral feet from the same subject stay in the same split.
+  - Script: src/pipeline/data_split.py
+  - Artifacts: data/subject_manifest.csv, outputs/phase0_prep/split_summary.json
 
-Standard Global Average Pooling (GAP) collapses 2D feature maps into a 1D vector, discarding spatial localization. In plantar thermography, pathological hotspots are localized to specific vascular angiosomes (LCA, LPA, MCA, MPA).
+* Phase 0.7 (Array preprocessing):
+  Normalized temperature matrices into float32 .npy arrays at 128x64 (H x W).
+  Used a fixed physical range [15.0°C, 35.0°C] across all images. Flipped left feet
+  horizontally for anatomical alignment, and zero-masked backgrounds.
+  - Script: src/pipeline/preprocessing.py
+  - Artifacts: data/processed/arrays/{train,val,test}/*.npy, data/processed/images/
 
-```text
+* Phase 0.8 (Class weights and statistics):
+  Computed inverse class frequency weights (6-class) and channel statistics.
+  (3-class weights are computed dynamically in training scripts).
+  - Script: src/pipeline/compute_class_weights.py
+  - Artifacts: outputs/phase0_prep/class_weights.json, dataset_statistics.json
+
+Phase 1: Convolutional models
+-----------------------------
+
+* Phase 1.0 (Baseline EfficientNet-B0):
+  Standard EfficientNet-B0 trained on 6 TCI classes with nearest-neighbor resize
+  and unweighted cross-entropy.
+  - Benchmark: 38.46% test accuracy, 0.3267 weighted F1
+  - Script: src/train_phase1_0.py
+
+* Phase 1.1 (Upgraded EfficientNet-B0):
+  Switched to 3-class severity grouping (ADR 0001). Replaced resize with bilinear
+  interpolation and boundary masking, added ConcatPool (GAP + GMP), and unfroze
+  the top block.
+  - Benchmark: 69.23% test accuracy, 0.7024 weighted F1
+  - Script: src/train_phase1_1.py
+
+* Phase 1.2 (Regional EfficientNet):
+  Replaced global pooling with SpatialConcatPool2d. The 7x4 feature map is split into
+  a 2x2 grid covering four anatomical quadrants (Forefoot Medial/Lateral, Heel Medial/Lateral).
+  Each quadrant gets average and max pooling, producing a 10,240-d vector.
+  Trained with OrdinalWeightedCELoss (ADR 0002) using two-stage transfer learning
+  (Stage A head warm-up at 1e-3, Stage B fine-tune at 1e-4), test-time augmentation (TTA),
+  and checkpoint ensembling.
+  - Benchmark: 80.77% test accuracy, 0.8104 weighted F1
+  - Clinical metrics: 100.0% Healthy recall, 100.0% High-Severity precision
+  - Model: src/models/efficientnet.py
+  - Script: src/train_phase1_2.py
+
+Regional CNN architecture (Phase 1.2):
+
 +---------------------------------------------------------------------------------+
 |                   PHASE 1.2: REGIONAL CNN ARCHITECTURE                          |
 +---------------------------------------------------------------------------------+
 
-                               [ Raw Thermogram (CSV) ]
-                                          |
-                                          v
+                              [ Raw Thermogram (CSV) ]
+                                         |
+                                         v
 +---------------------------------------------------------------------------------+
 |  Phase 0 Preprocessing Pipeline:                                                |
 |   - Fixed Physical Normalization: [15°C, 35°C] (Preserves absolute gradients)   |
@@ -69,8 +126,8 @@ Standard Global Average Pooling (GAP) collapses 2D feature maps into a 1D vector
                   +---------------------------------------+
                   |   EfficientNet-B0 Backbone (Stage B)  |
                   |   - Pretrained on ImageNet-1k         |
-                  |   - Lower CNN layers:  LR = 1e-5      |
-                  |   - Classification:    LR = 1e-4      |
+                  |   - features[0..6]:    Frozen         |
+                  |   - features[7] + Head: LR = 1e-4     |
                   +-------------------+-------------------+
                                       |
                                       v
@@ -99,9 +156,9 @@ Standard Global Average Pooling (GAP) collapses 2D feature maps into a 1D vector
                                       |
                                       v
                   +---------------------------------------+
-                  |       Linear Classification Head      |
-                  |       - BatchNorm1d + Dropout (0.4)   |
-                  |       - Linear Projection (10k -> 3)  |
+                  |      2-Layer Bottleneck Head          |
+                  |   - Linear(10240 -> 256) + BN1d + ReLU|
+                  |   - Dropout(0.3) -> Linear(256 -> 3)  |
                   +-------------------+-------------------+
                                       |
     - - - - - - - - - - - - - - - - - + - - - - - - - - - - - - - - - - -
@@ -116,34 +173,29 @@ Standard Global Average Pooling (GAP) collapses 2D feature maps into a 1D vector
                                     +-----------------------------------------+
                                     |       3-Class Risk Stratification       |
                                     |  [0] Healthy        ->  100.0% Recall   |
-                                    |  [1] Low Severity   ->   78.6% Prec/Rec |
-                                    |  [2] High Severity  ->   95.5% Precision|
+                                    |  [1] Low Severity   ->  76.9% P / 71.4% R|
+                                    |  [2] High Severity  ->  100.0% Precision|
                                     |  Overall Test: 80.77% Acc | 0.8104 wF1  |
                                     +-----------------------------------------+
-```
 
-### Core Components
-1. **`SpatialConcatPool2d` (2×2 Quadrant Pooling):**
-   * Divides the final $7 \times 4$ convolutional feature map into a $2 \times 2$ grid (quadrants corresponding to Forefoot Left/Right and Heel Left/Right).
-   * Computes both Average Pooling and Max Pooling per quadrant, yielding $4 \text{ quadrants} \times 2 \text{ modes} = 8$ regional feature vectors.
-   * Concatenates them into a 10,240-dimensional localized descriptor ($1280 \times 8$).
-2. **Two-Stage Fine-Tuning:**
-   * **Stage A (Warmup):** Backbone frozen, training only the regional projection head and BatchNorm.
-   * **Stage B (Discriminative Unfreeze):** Lower CNN layers trained with $\text{LR}=10^{-5}$, classification head trained with $\text{LR}=10^{-4}$.
-3. **Inference Optimization:**
-   * **Test-Time Augmentation (TTA):** Multi-view evaluation combining identity, subtle vertical flips, and contrast perturbations.
-   * **Probability Ensembling:** Checkpoint ensembling across top validation plateau epochs.
-   * **Result:** Reached **80.77% Test Accuracy** and **0.8104 Weighted F1**.
+Phase 2: Vision transformer (ViT-Tiny)
+--------------------------------------
 
----
+* Phase 2.0 (ViTTinyThermal):
+  Evaluated vision transformers for bilateral thermal asymmetry. Used timm's
+  vit_tiny_patch16_224 (~5.7M base parameters, 12 blocks, 3 heads/block, 192 embedding dim).
+  Adapted input resolution by resizing 128x64 to 224x112 with bilinear interpolation,
+  padding horizontally to 224x224 (48 px left, 64 px right zeros) to align with 16 px
+  patches, and repeating to 3 channels.
+  Trained with FP16 AMP and OrdinalWeightedCELoss.
+  - Benchmark: 88.46% test accuracy, 0.8842 weighted F1 (46/52 feet correct)
+  - Clinical metrics: 100.0% Healthy recall, 95.5% High-Severity precision
+  - Model: src/models/vit_tiny.py
+  - Script: src/train_phase2.py
+  - Status: Baseline verified. Patch resolution and unfreeze depth ablations pending.
 
-## Phase 2 Deep Dive: Vision Transformer (ViT-Tiny)
+Vision Transformer architecture (Phase 2):
 
-[`src/models/vit_tiny.py`](src/models/vit_tiny.py) (`ViTTinyThermal`)
-
-Phase 2 investigates whether multi-head self-attention can capture long-range bilateral thermal correlations across non-adjacent angiosomes without inductive spatial bias.
-
-```text
 +---------------------------------------------------------------------------------+
 |                   PHASE 2: ViT-TINY VISION TRANSFORMER                          |
 +---------------------------------------------------------------------------------+
@@ -154,7 +206,7 @@ Phase 2 investigates whether multi-head self-attention can capture long-range bi
 +---------------------------------------------------------------------------------+
 |  Aspect-Ratio Preserving Adaptation:                                            |
 |   1. Bilinear Interpolation: 128 x 64  ----->  224 x 112 (Preserves 2:1 anatomy)|
-|   2. Symmetric Zero-Padding: 224 x 112 ----->  224 x 224 (+56 px border zeros)  |
+|   2. Asymmetric Zero-Padding: 224 x 112 ---->  224 x 224 (+48L / +64R zeros)    |
 |   3. 3-Channel Replication:  1 x 224^2 ----->  3 x 224 x 224 (RGB-equivalent)   |
 +-------------------------------------+-------------------------------------------+
                                       |
@@ -170,7 +222,7 @@ Phase 2 investigates whether multi-head self-attention can capture long-range bi
 +---------------------------------------------------------------------------------+
 |  12 Transformer Encoder Blocks (Selective Fine-Tuning):                         |
 |   - Multi-Head Self-Attention (MHSA: 3 heads per block, head dimension = 64)    |
-|   - Models global bilateral asymmetry across distant angiosome vascular beds    |
+|   - Models global bilateral thermal relationships across angiosomes             |
 |   - LayerNorm + MLP Blocks with Residual Skip Connections                       |
 +-------------------------------------+-------------------------------------------+
                                       |
@@ -194,127 +246,113 @@ Phase 2 investigates whether multi-head self-attention can capture long-range bi
   |   - Asymmetric penalties  |     |   * Healthy Recall:   100.0%  (14 / 14) |
   +---------------------------+     |   * High-Sev Precision: 95.5% (21 / 22) |
                                     +-----------------------------------------+
-```
 
-### Core Components
-1. **Backbone (`vit_tiny_patch16_224` via `timm`):**
-   * 12 transformer encoder blocks, 3 attention heads per block, embedding dimension $D=192$ (~5.7M parameters).
-   * Pretrained on ImageNet-1k with selective backbone fine-tuning.
-2. **Aspect-Ratio Preserving Symmetric Zero-Padding:**
-   * The canonical thermal array is $128 \times 64$ (2:1 aspect ratio). Directly stretching it to $224 \times 224$ introduces severe non-affine anatomical distortion.
-   * ViTTinyThermal applies bilinear interpolation to $224 \times 112$, followed by patch-aligned symmetric horizontal zero-padding (+56 pixels left/right) to form a standard $224 \times 224$ input ($14 \times 14 = 196$ patches of $16 \times 16$).
-   * Non-foot background padding is explicitly masked to $0.0$, preventing patch corruption.
-3. **Input Channel Replication:**
-   * The single-channel float32 temperature matrix is replicated across 3 RGB channels to align with pretrained transformer patch projection weights.
-4. **Benchmark Results:**
-   * **Test Accuracy:** **88.46%** (46 / 52 feet correct).
-   * **Weighted F1 Score:** **0.8842**.
-   * **Healthy Recall:** **100.0%** (14 / 14 controls correctly identified).
-   * **High Severity Precision:** **95.5%** (21 / 22 high-risk feet accurately detected).
+Phase 3: Hybrid CNN + ViT (roadmap)
+-----------------------------------
 
----
+* Phase 3.0 (Hybrid Thermal Architecture):
+  Combines localized spatial representations from regional convolutional stages
+  with global contextual self-attention tokens from transformer blocks.
+  Blueprint: src/models/hybrid_cnn_vit.py
 
-## Hardware Optimization (GTX 1650 Compliant)
 
-All pipelines are engineered to run within a **4 GB VRAM budget** (NVIDIA GeForce GTX 1650, 16 GB RAM):
-* **Automatic Mixed Precision (AMP FP16):** `torch.amp.autocast('cuda')` used across all forward passes.
-* **DataLoader:** `num_workers=2`, `pin_memory=True`.
-* **Batch Size:** 16 (effective batch size 32 via 2-step gradient accumulation where needed).
-* **On-the-fly Data Augmentation:** Prevents RAM exhaustion.
+Benchmark summary
+=================
 
----
++---------------+-----------------------+--------------------------------------+---------------+-------------+
+| Phase         | Architecture          | Key changes                          | Test Accuracy | Weighted F1 |
++---------------+-----------------------+--------------------------------------+---------------+-------------+
+| Phase 1.0     | EfficientNet-B0 (6-cl)| Nearest-neighbor resize, standard CE | 38.46%        | 0.3267      |
+| Phase 1.1     | EfficientNet-B0 (3-cl)| Bilinear+mask, ConcatPool, freeze    | 69.23%        | 0.7024      |
+| Phase 1.2     | Regional EfficientNet | SpatialConcatPool2d (2x2), TTA + Ens | 80.77%        | 0.8104      |
+| Phase 2.0     | ViT-Tiny Transformer  | Patch self-attention, aspect padding | 88.46%        | 0.8842      |
++---------------+-----------------------+--------------------------------------+---------------+-------------+
 
-## Getting Started
 
-### 1. Environment Setup
+Project reference
+=================
 
-```bash
-# Clone the repository
-git clone https://github.com/3a00/ThermoGuard-DFU.git
-cd ThermoGuard-DFU
+Clinical setup
+--------------
+* Severity classes (ADR 0001):
+  - Healthy (Class 0): Control group subjects with normal thermoregulation.
+  - Low Severity (Class 1): DM Grade 0, Grade 1, and Grade 2 (early/mild neurovascular changes).
+  - High Severity (Class 2): DM Grade 3 and Grade 4 (advanced neuropathy and ulcer risk).
+* TCI scoring: src/pipeline/tci_labeling.py
+* Physical normalization: [15°C, 35°C] in src/pipeline/preprocessing.py
+* Domain terminology: CONTEXT.md
 
-# Create and activate a Python virtual environment (Python 3.10+)
-python3 -m venv venv
-source venv/bin/activate
+Components and scripts
+----------------------
+* Dataset loader with dynamic training augmentations: src/datasets/thermal_dataset.py
+* Regional CNN model: src/models/efficientnet.py (EfficientNetThermalV3)
+* Vision transformer model: src/models/vit_tiny.py (ViTTinyThermal)
+* Ordinal loss function: src/utils/losses.py (OrdinalWeightedCELoss)
+* Training scripts: src/train_phase1_2.py (Phase 1.2) and src/train_phase2.py (Phase 2)
+* Evaluation script: src/evaluate.py
+* Telemetry: outputs/phase2_vit/tensorboard/
 
-# Install required dependencies
-pip install -r requirements.txt
-```
+Hardware and training settings
+------------------------------
+* Platform: NVIDIA GTX 1650 (~4 GB VRAM), 16 GB RAM, Intel Core i5.
+* Precision: FP16 AMP via torch.amp.autocast('cuda').
+* DataLoader: num_workers=2, pin_memory=True.
+* Batch size: 16 per step without accumulation.
+* Checkpoints: saved in outputs/*/checkpoints/.
+* Tests: tests/test_phase2_vit.py.
 
-### 2. Dataset Download & Configuration
+Validation and integrity
+------------------------
+* Architecture decisions: docs/adr/0001-three-class-severity-grouping.md, docs/adr/0002-ordinal-weighted-cross-entropy-loss.md.
+* Split integrity: Subject-level split in data/subject_manifest.csv (seed 42) prevents bilateral foot leakage.
+* Traceability: Raw-to-processed mapping in data/file_traceability_manifest.csv.
+* Plots and metrics: Confusion matrices and per-class reports in outputs/phase2_vit/.
 
-1. Download the **Plantar Thermogram Database** from [IEEE Dataport](https://ieee-dataport.org/open-access/plantar-thermogram-database).
-2. Extract the archive into `IEE data port(original)/ThermoDataBase(IEE data port)/ThermoDataBase/` (or your preferred local directory).
-3. If using a custom path, update `config.yaml`:
 
-```yaml
-data:
-  extracted_root: "path/to/ThermoDataBase"
-  excel_path: "path/to/Plantar Thermogram Database.xlsx"
-```
+Repository layout
+=================
 
-> **Note on Model Checkpoints:** Large `.pth` model weights are excluded from Git history via `.gitignore` to keep the repository lightweight (~3 MB). Running the training commands below will produce and save fresh checkpoints to `outputs/phase1_2_regional/checkpoints/` and `outputs/phase2_vit/checkpoints/`.
-
-### 3. Running Preprocessing Pipeline (Phase 0)
-
-```bash
-# Compute TCI ground-truth labels
-python src/pipeline/tci_labeling.py
-
-# Generate deterministic subject-level split
-python src/pipeline/data_split.py
-
-# Process raw CSVs into normalized .npy arrays (128x64)
-python src/pipeline/preprocessing.py
-
-# Calculate class distribution and loss weights
-python src/pipeline/compute_class_weights.py
-```
-
-### 4. Training & Evaluating Models
-
-```bash
-# Train Phase 1.2 (Regional EfficientNet-B0)
-python src/train_phase1_2.py
-
-# Evaluate Phase 1.2 on test split
-python src/evaluate.py --phase phase1_2
-
-# Train Phase 2 (ViT-Tiny Transformer)
-python src/train_phase2.py
-
-# Evaluate Phase 2 on test split
-python src/evaluate.py --phase phase2
-```
-
----
-
-## Repository Structure
-
-```text
 thermalDFU/
-├── config.yaml                    # Central experiment & hardware configuration
-├── CONTEXT.md                     # Domain glossary & terminology standards
-├── data/                          # Data manifests (subject-level splits & metadata)
-├── docs/                          # Architecture Decision Records (ADRs) & guidelines
-├── outputs/                       # Metric reports, training curves, confusion matrices
-│   ├── phase1_2_regional/         # Phase 1.2 evaluation artifacts
-│   └── phase2_vit/                # Phase 2 evaluation artifacts & TensorBoard logs
-├── src/
-│   ├── datasets/                  # PyTorch Dataset loaders with augmentation
-│   ├── models/                    # EfficientNet-B0 and ViT-Tiny blueprints
-│   ├── pipeline/                  # Phase 0 data processing & manifest scripts
-│   ├── utils/                     # Custom losses (OrdinalWeightedCELoss)
-│   ├── train_phase1_2.py          # Phase 1.2 two-stage training script
-│   ├── train_phase2.py            # Phase 2 ViT training script
-│   └── evaluate.py                # Unified multi-phase test evaluator
-└── tests/                         # Pre-flight verification suites
-```
+|-- config.yaml                     # Hyperparameters, hardware settings, and paths
+|-- CONTEXT.md                      # Clinical and technical glossary
+|-- README.md                       # Project documentation
+|-- readmeB.txt                     # Technical documentation
+|-- requirements.txt                # Python dependencies
+|-- .agents/
+|   `-- AGENTS.md                   # Project directives and hardware bounds
+|-- .scratch/
+|   `-- phase2-vit/                 # Phase 2 planning and tickets
+|-- data/
+|   |-- subject_manifest.csv        # Split manifest (116 train / 25 val / 26 test)
+|   |-- file_traceability_manifest.csv
+|   `-- processed/
+|       |-- arrays/                 # 128x64 float32 canonical .npy arrays
+|       `-- images/                 # Plasma colormap PNG previews
+|-- docs/
+|   `-- adr/                        # Architecture Decision Records (0001, 0002)
+|-- outputs/                        # Experiment artifacts by phase
+|   |-- phase0_prep/                # Manifests, distribution plots, class weights
+|   |-- phase1_0_baseline/          # Phase 1.0 metrics, predictions, logs
+|   |-- phase1_1_upgraded/          # Phase 1.1 metrics, predictions, logs
+|   |-- phase1_2_regional/          # Phase 1.2 metrics, checkpoints
+|   `-- phase2_vit/                 # Phase 2 metrics, checkpoints, TensorBoard
+|-- src/
+|   |-- datasets/                   # PyTorch dataset loaders with dynamic augmentation
+|   |-- models/                     # EfficientNetThermalV3, ViTTinyThermal, Hybrid
+|   |-- pipeline/                   # Phase 0 extraction, split, and prep scripts
+|   |-- utils/                      # OrdinalWeightedCELoss and evaluation helpers
+|   |-- train_phase1_0.py           # Phase 1.0 baseline training script
+|   |-- train_phase1_1.py           # Phase 1.1 upgraded training script
+|   |-- train_phase1_2.py           # Phase 1.2 regional CNN training script
+|   |-- train_phase2.py             # Phase 2 Vision Transformer training script
+|   `-- evaluate.py                 # Evaluation script
+`-- tests/
+    `-- test_phase2_vit.py          # Pre-flight architecture and freeze tests
 
----
 
-## Authors & Citation
+Project information
+===================
 
-* **Project Owner:** wenalz
-* **Project:** Senior Graduation Capstone Project — ThermoGuard-DFU
-* **Dataset Reference:** Hernandez-Contreras et al., *Plantar Thermogram Database*, IEEE Dataport.
+* Project Lead: wenalz (Graduation Capstone Project)
+* Primary Dataset: IEEE Plantar Thermogram Database (Hernandez-Contreras et al.)
+* Architecture Decisions: By abed (see AGENTS.md for more context)

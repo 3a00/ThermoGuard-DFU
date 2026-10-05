@@ -71,9 +71,6 @@ outputs/*/checkpoints/
 # --- Temporary & Agent Scratch Dirs ---
 .alvar/
 *.log
-scratch/
-.scratch/
-.agents/
 
 # --- TensorBoard Logs ---
 outputs/*/tensorboard/

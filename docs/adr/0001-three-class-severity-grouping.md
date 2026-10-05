@@ -10,8 +10,8 @@ The raw IEEE Plantar Thermogram dataset labels subjects across 6 categories: `He
 
 Map the 6 classes dynamically at dataset loading time into 3 actionable clinical severity categories:
 - `Healthy` (Class 0): Control subjects (Grade -1 / Healthy)
-- `Low_Severity` (Class 1): Subclinical or mild temperature deviations (`DM_Grade0`, `DM_Grade1`)
-- `High_Severity` (Class 2): Marked to critical angiosome asymmetry indicating high ulceration risk (`DM_Grade2`, `DM_Grade3`, `DM_Grade4`)
+- `Low_Severity` (Class 1): Subclinical or mild temperature deviations (`DM_Grade0`, `DM_Grade1`, `DM_Grade2`)
+- `High_Severity` (Class 2): Marked to critical angiosome asymmetry indicating high ulceration risk (`DM_Grade3`, `DM_Grade4`)
 
 The underlying Phase 0 preprocessed arrays and manifests remain immutable and untouched.
 
