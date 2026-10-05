@@ -313,41 +313,41 @@ Repository layout
 =================
 
 thermalDFU/
-|-- config.yaml                     # Hyperparameters, hardware settings, and paths
-|-- CONTEXT.md                      # Clinical and technical glossary
-|-- README.md                       # Project documentation
-|-- readmeB.txt                     # Technical documentation
-|-- requirements.txt                # Python dependencies
-|-- .agents/
-|   `-- AGENTS.md                   # Project directives and hardware bounds
-|-- .scratch/
-|   `-- phase2-vit/                 # Phase 2 planning and tickets
-|-- data/
-|   |-- subject_manifest.csv        # Split manifest (116 train / 25 val / 26 test)
-|   |-- file_traceability_manifest.csv
-|   `-- processed/
-|       |-- arrays/                 # 128x64 float32 canonical .npy arrays
-|       `-- images/                 # Plasma colormap PNG previews
-|-- docs/
-|   `-- adr/                        # Architecture Decision Records (0001, 0002)
-|-- outputs/                        # Experiment artifacts by phase
-|   |-- phase0_prep/                # Manifests, distribution plots, class weights
-|   |-- phase1_0_baseline/          # Phase 1.0 metrics, predictions, logs
-|   |-- phase1_1_upgraded/          # Phase 1.1 metrics, predictions, logs
-|   |-- phase1_2_regional/          # Phase 1.2 metrics, checkpoints
-|   `-- phase2_vit/                 # Phase 2 metrics, checkpoints, TensorBoard
-|-- src/
-|   |-- datasets/                   # PyTorch dataset loaders with dynamic augmentation
-|   |-- models/                     # EfficientNetThermalV3, ViTTinyThermal, Hybrid
-|   |-- pipeline/                   # Phase 0 extraction, split, and prep scripts
-|   |-- utils/                      # OrdinalWeightedCELoss and evaluation helpers
-|   |-- train_phase1_0.py           # Phase 1.0 baseline training script
-|   |-- train_phase1_1.py           # Phase 1.1 upgraded training script
-|   |-- train_phase1_2.py           # Phase 1.2 regional CNN training script
-|   |-- train_phase2.py             # Phase 2 Vision Transformer training script
-|   `-- evaluate.py                 # Evaluation script
-`-- tests/
-    `-- test_phase2_vit.py          # Pre-flight architecture and freeze tests
+├── config.yaml                     # Hyperparameters, hardware settings, and paths
+├── CONTEXT.md                      # Clinical and technical glossary
+├── README.md                       # Project documentation
+├── readmeB.md                     # Technical documentation
+├── requirements.txt                # Python dependencies
+├── .agents/
+│   └── AGENTS.md                   # Project directives and hardware bounds
+├── .scratch/
+│   └── phase2-vit/                 # Phase 2 planning and tickets
+├── data/
+│   ├── subject_manifest.csv        # Split manifest (116 train / 25 val / 26 test)
+│   ├── file_traceability_manifest.csv
+│   └── processed/
+│       ├── arrays/                 # 128x64 float32 canonical .npy arrays
+│       └── images/                 # Plasma colormap PNG previews
+├── docs/
+│   └── adr/                        # Architecture Decision Records (0001, 0002)
+├── outputs/                        # Experiment artifacts by phase
+│   ├── phase0_prep/                # Manifests, distribution plots, class weights
+│   ├── phase1_0_baseline/          # Phase 1.0 metrics, predictions, logs
+│   ├── phase1_1_upgraded/          # Phase 1.1 metrics, predictions, logs
+│   ├── phase1_2_regional/          # Phase 1.2 metrics, checkpoints
+│   └── phase2_vit/                 # Phase 2 metrics, checkpoints, TensorBoard
+├── src/
+│   ├── datasets/                   # PyTorch dataset loaders with dynamic augmentation
+│   ├── models/                     # EfficientNetThermalV3, ViTTinyThermal, Hybrid
+│   ├── pipeline/                   # Phase 0 extraction, split, and prep scripts
+│   ├── utils/                      # OrdinalWeightedCELoss and evaluation helpers
+│   ├── train_phase1_0.py           # Phase 1.0 baseline training script
+│   ├── train_phase1_1.py           # Phase 1.1 upgraded training script
+│   ├── train_phase1_2.py           # Phase 1.2 regional CNN training script
+│   ├── train_phase2.py             # Phase 2 Vision Transformer training script
+│   └── evaluate.py                 # Evaluation script
+└── tests/
+    └── test_phase2_vit.py          # Pre-flight architecture and freeze tests
 
 
 Project information
